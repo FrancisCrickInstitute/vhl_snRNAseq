@@ -67,41 +67,28 @@ analyse_parse <- function(
   saveRDS(seu, file = out$seu_pre_qc)
   cat("Performing quality control...\n")
 
-  # check proportion of
-  trancript_types %>%
-    purrr::pmap(function(...) {
-      tt <- tibble::tibble(...)
-      cat("Calculating %", tt$name, "genes...\n")
-      seu <- seu %>%
-        Seurat::PercentageFeatureSet(
-          pattern = tt$pattern,
-          col.name = paste0("percent.", tt$name)
-        )
-    })
-
-  cat("Calculating % mitochondrial genes...\n")
-  cat("mtRNA levels should be very low for snRNAseq.\n")
-  seu <- seu %>%
-    Seurat::PercentageFeatureSet(pattern = "^MT-", col.name = "percent.mt")
-
-  cat("Calculating % ribosomal genes...\n")
-  cat("Not for technical control, but can have biological relevance.\n")
-  seu <- seu %>%
-    Seurat::PercentageFeatureSet(pattern = "^RP[SL]", col.name = "percent.ribo")
-
-  cat("Calculating % hemoglobin genes...\n")
-  cat("These are very abundant in erythrocytes, which could be seen as contaminants.\n")
-  seu <- seu %>%
-    Seurat::PercentageFeatureSet(pattern = "^HB[^(P)]", col.name = "percent.globin")
+  # check proportion of relevant transcript types
+  purrr::pmap(transcript_types, function(...) {
+    tt <- tibble::tibble(...)
+    cat("Calculating %", tt$name, "genes...\n")
+    cat(tt$message, "\n\n")
+    # use `<<` for global assignment
+    seu <<- seu %>%
+      Seurat::PercentageFeatureSet(
+        pattern = tt$pattern,
+        col.name = paste0("percent.", tt$name)
+      )
+  })
 
   # plots
   cat("Visualising QC per cell and gene...\n")
   cat("Cell QC plots are saved to", out$base)
   pdf(paste0(out$base, "cell_qc_plots.pdf"), onefile = T)
-  plot_violin_qc(seu)
-  plot_scatter_qc(seu, "nFeature_RNA")
-  plot_scatter_qc(seu, "percent.mt")
-  plot_scatter_qc(seu, "percent.globin", "percent.ribo")
+  Seurat::VlnPlot(seu, c("percent.mt", "percent.ribo", "percent.globin"),
+                  pt.size = 0.1, ncol = 3)
+  Seurat::FeatureScatter(seu, "nCount_RNA", "nFeature_RNA")
+  Seurat::FeatureScatter(seu, "nCount_RNA", "percent.mt")
+  Seurat::FeatureScatter(seu, "percent.globin", "percent.ribo")
   dev.off()
 
   # 2) NORMALISATION AND SCALING

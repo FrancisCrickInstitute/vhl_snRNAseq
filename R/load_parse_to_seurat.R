@@ -17,7 +17,7 @@ load_parse_to_seurat <-
     # read in cell metadata
     cell_metadata <- paste0(data_dir, "cell_metadata.csv") %>%
       readr::read_csv(show_col_types = F) %>%
-      tibble::column_to_rownames("bc.wells") %>%
+      tibble::column_to_rownames("bc_wells") %>%
       as.data.frame()
 
     # create Seurat DGE object
@@ -25,9 +25,9 @@ load_parse_to_seurat <-
       Seurat::CreateSeuratObject(
         names.field = 0,
         meta.data = cell_metadata,
-        # keep cells that have at least 100 genes
+        # keep cells that have at least n genes
         min_genes = min_genes,
-        # keep genes expressed in at least 3 cells
+        # keep genes expressed in at least n cells
         min_cells = min_cells
       )
 

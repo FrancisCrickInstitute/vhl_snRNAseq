@@ -4,6 +4,6 @@
 trancript_types <- readr::read_tsv("data/transcript_types.tsv")
 
 # save to sysdata
-usethis::use_data(trancript_types,
+usethis::use_data(transcript_types,
                   overwrite = TRUE,
                   internal = TRUE)
