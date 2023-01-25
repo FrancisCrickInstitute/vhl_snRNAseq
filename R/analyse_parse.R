@@ -45,7 +45,7 @@ analyse_parse <- function(
   out <- define_out(experiment, genome, out_dir, do_timestamp)
 
   # save arguments
-  dput(args, file = out$args)
+  # dput(args, file = out$args)
 
   # load parse output to seurat object
   seu <- load_parse_to_seurat(
@@ -60,7 +60,7 @@ analyse_parse <- function(
   # -> unusually high transcript/gene counts indicate multiplets
   # -> unusually low transcript/gene counts indicate barcoding of cells with
   #    damaged membranes
-  # -> high % mt genes indicates loss of cytoplasmic RNA / increased apoptosis
+  # -> high % mito genes indicates loss of cytoplasmic RNA / increased apoptosis
   #    (for scRNA-seq, not snRNA-seq)
 
   cat("Saving pre-QC Seurat object to", out$seu_pre_qc, "\n")
@@ -68,7 +68,7 @@ analyse_parse <- function(
   cat("Performing quality control...\n")
 
   # check proportion of relevant transcript types
-  purrr::pmap(transcript_types, function(...) {
+  purrr::pwalk(transcript_types, function(...) {
     tt <- tibble::tibble(...)
     cat("Calculating %", tt$name, "genes...\n")
     cat(tt$message, "\n\n")
@@ -82,12 +82,13 @@ analyse_parse <- function(
 
   # plots
   cat("Visualising QC per cell and gene...\n")
-  cat("Cell QC plots are saved to", out$base)
+  cat("Cell QC plots are saved to", out$base, "\n")
   pdf(paste0(out$base, "cell_qc_plots.pdf"), onefile = T)
-  Seurat::VlnPlot(seu, c("percent.mt", "percent.ribo", "percent.globin"),
+  Seurat::VlnPlot(seu, c("percent.mito", "percent.ribo", "percent.globin"),
+                  group.by = "sample",
                   pt.size = 0.1, ncol = 3)
   Seurat::FeatureScatter(seu, "nCount_RNA", "nFeature_RNA")
-  Seurat::FeatureScatter(seu, "nCount_RNA", "percent.mt")
+  Seurat::FeatureScatter(seu, "nCount_RNA", "percent.mito")
   Seurat::FeatureScatter(seu, "percent.globin", "percent.ribo")
   dev.off()
 
