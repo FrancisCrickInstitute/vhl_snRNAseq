@@ -1,0 +1,4 @@
+name	pattern	message
+mito	^MT-	mtRNA levels should be very low for snRNAseq.
+ribo	^RP[SL]	mRNA that code for ribosomal proteins. They do not point to specific issues, but it can be good to have a look at their relative abundance. They can have biological relevance.
+globin	^HB[^(P)]	Globin genes are very abundant in erythrocytes. Depending on your application, you can expect ‘contamination’ of erythrocytes and select against it.
