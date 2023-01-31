@@ -11,7 +11,7 @@ analyse_parse <- function(
     experiment,
     parse_pipeline_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
     genome = "hg38",
-    parse_analysis_subdir = "/all-well/DGE_filtered/",
+    parse_analysis_subdir = "/all-well/DGE_unfiltered/",
     out_dir = NULL,
     sample_subset = NULL,
     min_genes = 3,
@@ -34,7 +34,7 @@ analyse_parse <- function(
   library(devtools) ; load_all()
   experiment = "221202_A01366_0326_AHHTTWDMXY"
   genome = "hg38"
-  parse_dir = paste0(base_dir, "/parse_pipeline/analysis/")
+  parse_dir = paste0(base_dir, "/parse_pipeline/analysis/archive_230130/")
   parse_analysis_subdir = "/all-well/DGE_filtered/"
   out_dir = NULL
   sample_subset = c("N090_V1024A", "N090_V1027")
@@ -61,8 +61,8 @@ analyse_parse <- function(
   # -> unusually high transcript/gene counts indicate multiplets
   # -> unusually low transcript/gene counts indicate barcoding of cells with
   #    damaged membranes (uninformative)
-  # -> high % mito genes indicates loss of cytoplasmic RNA / increased apoptosis
-  #    (for scRNA-seq, not snRNA-seq)
+  # -> high % mito genes indicates death / loss of cytoplasmic RNA / increased 
+  #    apoptosis (for scRNA-seq, not snRNA-seq)
   # -> high % globin and low % ribo suggests erythrocytes
 
   cat("Saving pre-QC Seurat object to", out$seu_pre_qc, "\n")
@@ -81,6 +81,8 @@ analyse_parse <- function(
         col.name = paste0("percent.", tt$name)
       )
   })
+  summary(seu@meta.data$percent.mito)
+  seu$quartile.mito <- cut()
 
   # plot transcript type abundances
   cat("Visualising QC per cell and gene...\n")
@@ -102,10 +104,14 @@ analyse_parse <- function(
   # -> < 8% mitochondrial RNA counts per cell
   # -> > 200 features per cell
   # -> < 5000 detected features per cell
+  # -> < 10,000 genes per cell
   seu <- seu %>%
     subset(subset = nFeature_RNA > 200 &
                     nFeature_RNA < 5000 &
+                    nCount_RNA > 300 &
+                    gene_count < 10000 &
                     percent.mito < 8)
+  # TODO: change percent.mito for snRNAseq? more stringent threshold?
 
   # visualise new distribution
   pdf(paste0(out$base, "cell_post_qc_plot.pdf"))
@@ -145,7 +151,7 @@ analyse_parse <- function(
     set.indent = T
   )
 
-  # perform PCA and colour by phase
+  # perform PCA and colour by phase to check for cell cycle-based variation
   # if there are large differences due to cell cycle phase,
   # the we might regress out variation due to cell cycle
   seu <- Seurat::RunPCA(seu)
