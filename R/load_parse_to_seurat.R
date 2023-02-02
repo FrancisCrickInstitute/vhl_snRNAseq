@@ -3,8 +3,8 @@ load_parse_to_seurat <-
            genome,
            parse_dir,
            parse_analysis_subdir,
-           min_genes,
-           min_cells,
+           min_genes_per_cell,
+           min_cells_per_gene,
            sample_subset) {
 
     # get data dir
@@ -26,9 +26,9 @@ load_parse_to_seurat <-
         names.field = 0,
         meta.data = cell_metadata,
         # keep cells that have at least n genes
-        min_genes = min_genes,
+        min_genes = min_genes_per_cell,
         # keep genes expressed in at least n cells
-        min_cells = min_cells
+        min_cells = min_cells_per_gene
       )
 
     # subset to sample subset

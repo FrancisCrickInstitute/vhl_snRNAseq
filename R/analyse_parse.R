@@ -16,6 +16,7 @@ analyse_parse <- function(
     sample_subset = NULL,
     min_genes = 3,
     min_cells = 100,
+    max_percent_mito = 5,
     do_timestamp = F
 ) {
 
@@ -38,8 +39,9 @@ analyse_parse <- function(
   parse_analysis_subdir = "/all-well/DGE_filtered/"
   out_dir = NULL
   sample_subset = c("N090_V1024A", "N090_V1027")
-  min_genes = 3
-  min_cells = 100
+  min_genes_per_cell = 3
+  min_cells_per_gene = 100
+  max_percent_mito = 5
   do_timestamp = F
 
   # get output paths
@@ -51,7 +53,7 @@ analyse_parse <- function(
   # load parse output to seurat object
   seu <- load_parse_to_seurat(
     experiment, genome, parse_dir, parse_analysis_subdir,
-    min_genes, min_cells, sample_subset
+    min_genes_per_cell, min_cells_per_gene, sample_subset
   )
 
   # 1) QUALITY CONTROL PER GENE AND CELL ----
@@ -81,8 +83,6 @@ analyse_parse <- function(
         col.name = paste0("percent.", tt$name)
       )
   })
-  summary(seu@meta.data$percent.mito)
-  seu$quartile.mito <- cut()
 
   # plot transcript type abundances
   cat("Visualising QC per cell and gene...\n")
@@ -100,85 +100,206 @@ analyse_parse <- function(
   boxplot_top_genes(seu, 20)
   dev.off()
 
-  # mild cell filtering
-  # -> < 8% mitochondrial RNA counts per cell
-  # -> > 200 features per cell
-  # -> < 5000 detected features per cell
+  # mild cell filtering for doublets, dead cells, and ambient RNA
+  # -> > 200 & < 5000 detected molecules per cell
   # -> < 10,000 genes per cell
+  # -> < 8% mitochondrial RNA counts per cell
   seu <- seu %>%
     subset(subset = nFeature_RNA > 200 &
-                    nFeature_RNA < 5000 &
-                    nCount_RNA > 300 &
-                    gene_count < 10000 &
-                    percent.mito < 8)
+             nFeature_RNA < 5000 &
+             gene_count < 10000 &
+             percent.mito < max_percent_mito)
   # TODO: change percent.mito for snRNAseq? more stringent threshold?
 
+  cat("Saving post-filtering Seurat object to", out$seu_post_filtering, "\n")
+  saveRDS(seu, file = out$seu_post_filtering)
+  
   # visualise new distribution
   pdf(paste0(out$base, "cell_post_qc_plot.pdf"))
   Seurat::VlnPlot(seu, c("nFeature_RNA", "percent.mito"),
                   group.by = "sample")
   dev.off()
-
-  # 2) NORMALISATION AND SCALING
-  cat("2) Performaing normalisation and scaling...\n")
-
-  # log normalise
-  seu <- seu %>%
-    Seurat::NormalizeData(normalization.method = "LogNormalize",
-                          scale.factor = 10000)
-
-  # find variable features
-  seu <- seu %>%
-    Seurat::FindVariableFeatures(selection.method = "vst",
-                                 nfeatures = 2000)
-
-  # plot top 10 variable genes
-  top_10 <- seu %>% Seurat::VariableFeatures() %>% head(10)
-  pdf(paste0(out$base, "top_10_variable_genes_plot.pdf"))
-  seu %>%
-    Seurat::VariableFeaturePlot() %>%
-    Seurat::LabelPoints(points = top_10, repel = TRUE)
-  dev.off()
-
-  # scale
-  seu <- Seurat::ScaleData(seu, rownames(seu))
-
-  # assign cell cycle scores
-  s_genes <- Seurat::cc.genes$s.genes
-  g2m_genes <- Seurat::cc.genes$g2m.genes
-  seu <- Seurat::CellCycleScoring(
-    seu, s.features = s_genes, g2m.features = g2m_genes,
-    set.indent = T
-  )
-
-  # perform PCA and colour by phase to check for cell cycle-based variation
-  # if there are large differences due to cell cycle phase,
-  # the we might regress out variation due to cell cycle
-  seu <- Seurat::RunPCA(seu)
-  pdf(paste0(out$base, "pca_vs_cell_cycle_phase_plot.pdf"))
-  Seurat::DimPlot(seu,
-                  reduction = "pca",
-                  group.by = "Phase")
-  dev.off()
+  
+  do_norm_and_scale <- FALSE
+  if(do_norm_and_scale == TRUE) {
+    
+    # 2) NORMALISATION AND SCALING ----
+    cat("2) Performaing normalisation and scaling...\n")
+    
+    # log normalise
+    seu <- seu %>%
+      Seurat::NormalizeData(normalization.method = "LogNormalize",
+                            scale.factor = 10000)
+    
+    # find variable features
+    seu <- seu %>%
+      Seurat::FindVariableFeatures(selection.method = "vst",
+                                   nfeatures = 2000)
+    
+    # plot top 10 variable genes
+    top_10 <- seu %>% Seurat::VariableFeatures() %>% head(10)
+    pdf(paste0(out$base, "top_10_variable_genes_plot.pdf"))
+    seu %>%
+      Seurat::VariableFeaturePlot() %>%
+      Seurat::LabelPoints(points = top_10, repel = TRUE)
+    dev.off()
+    
+    # scale
+    seu <- Seurat::ScaleData(seu, rownames(seu))
+    
+    # assign cell cycle scores
+    s_genes <- Seurat::cc.genes$s.genes
+    g2m_genes <- Seurat::cc.genes$g2m.genes
+    seu <- Seurat::CellCycleScoring(
+      seu, s.features = s_genes, g2m.features = g2m_genes,
+      set.indent = T
+    )
+    
+    # perform PCA and colour by phase to check for cell cycle-based variation
+    # if there are large differences due to cell cycle phase,
+    # the we might regress out variation due to cell cycle
+    seu <- Seurat::RunPCA(seu)
+    pdf(paste0(out$base, "pca_vs_cell_cycle_phase_plot.pdf"))
+    Seurat::DimPlot(seu,
+                    reduction = "pca",
+                    group.by = "Phase")
+    dev.off()
+    
+  }
   
   # regressing out sources of unwanted variation with SCTransform
   # SCTransform is a better alternative to log transform normalisation.
   # It normalises data, performs variance stabilsation, and allows for 
   # additional covariates to be regressed out. 
+  seu <- Seurat::SCTransform(seu, vars.to.regress = c("nCount_RNA", "percent.mito"))
   
+  cat("Saving SCTransform-ed Seurat object to", out$seu_transformed, "\n")
+  saveRDS(seu, file = out$seu_transformed)
   
+  do_integration <- FALSE
+  if(do_intergation == TRUE) {
+    
+    # TODO: integration????
+    # Condition-specific clustering of the cells indicates that we need to 
+    # integrate the cells across conditions to ensure that cells of the same 
+    # cell type cluster together.
+    
+    # split cells into samples
+    split_seu <- Seurat::SplitObject(seu, split.by = "sample")
+    
+    # iterate SCTransform across cycles
+    split_seu <- split_seu %>%
+      purrr::map(Seurat::SCTransform, vars.to.regress = c("nCount_RNA", "percent.mito"))
+    
+    cat("Saving SCTransform-ed split Seurat object to", out$seu_split_transformed, "\n")
+    saveRDS(seu, file = out$seu_split_transformed)
+    
+  }
   
-  # 3) DIMENSIONALITY REDUCTION
+  # 3) DIMENSIONALITY REDUCTION ----
+  
+  # linear dimensionality reduction: perform PCA
+  seu <- Seurat::RunPCA(seu, features = Seurat::VariableFeatures(seu))
+  Seurat::VizDimLoadings(seu, dims = 1:2, reduction = "pca")
+  
+  # plot PCA
+  Seurat::DimPlot(seu, reduction = "pca", group.by = "sample")
+  Seurat::DimHeatmap(seu, dims = 1, cells = 500, balanced = TRUE)
+  Seurat::DimHeatmap(seu, dims = 1:15, cells = 500, balanced = TRUE)
+  
+  # determine the dimensionality of the data
+  Seurat::ElbowPlot(seu)
+  n_dims <- 20
+  
+  # 4) CLUSTERING ----
+  
+  Seurat::DefaultAssay(seu) <- "SCT"
+  seu <- Seurat::FindNeighbors(seu, dims = 1:n_dims)
+  seu <- Seurat::FindClusters(seu, resolution = 0.5)
+  head(Seurat::Idents(seu))
+  
+  # run non-linear dimensionality reduction: UMAP
+  seu <- Seurat::RunUMAP(seu, dims = 1:n_dims)
+  Seurat::DimPlot(seu, reduction = "umap")
+  Seurat::DimPlot(seu, reduction = "umap", group.by = "sample")
+  
+  cat("Saving UMAP-ed Seurat object to", out$seu_umap, "\n")
+  saveRDS(seu, file = out$seu_umap)
 
-  # 4) CLUSTERING
+  # 5) FINDING MARKERS - DIFFERENTIAL GENE EXPRESSION ----
 
-  # 5) CELL ANNOTATION
+  # genes that define clusters
+  seu_markers <- Seurat::FindAllMarkers(seu, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+  
+  # top 10 genes per cluster
+  top_markers_per_cluster <- seu_markers %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::mutate(
+      rank = rank(-avg_log2FC)
+    ) %>%
+    dplyr::filter(rank <= 100) %>% 
+    dplyr::arrange(rank, .by_group = T)
+  
+  # top gene per cluster
+  seu %>% Seurat::FeaturePlot(
+    features = dplyr::filter(top_markers_per_cluster, rank == 1)$gene
+  )
+  
+  # top 10 genes per cluster
+  seu %>%
+    Seurat::DoHeatmap(
+      features = dplyr::filter(top_markers_per_cluster, rank <= 10)$gene) + 
+    Seurat::NoLegend()
+  seu %>%
+    dittoSeq::dittoDotPlot(
+      vars = unique(dplyr::filter(top_markers_per_cluster, rank <= 3)$gene),
+      group.by = "SCT_snn_res.0.5"
+    )
+  
+  # 5) CELL ANNOTATION ----
+  
+  # celldex references from primary cell atlas
+  ref <- celldex::HumanPrimaryCellAtlasData()
+  seu_int_SingleR <- SingleR::SingleR(
+    test = Seurat::GetAssayData(seu, slot = "data"),
+    ref = ref,
+    labels = ref$label.main)
+  SingleR::plotScoreHeatmap(seu_int_SingleR)
+  SingleR::plotDeltaDistribution(seu_int_SingleR)
+  
+  # add labels, cull labels with < 10 cells
+  new_annots <- seu_int_SingleR$labels %>%
+    table() %>%
+    dplyr::as_tibble() %>%
+    dplyr::rename(celltype = ".") %>%
+    dplyr::mutate(SingleR_annot = replace(celltype, n < 10, "none")) %>%
+    dplyr::right_join(dplyr::tibble(celltype = seu_int_SingleR$labels))
+  seu$SingleR_annot <- new_annots$SingleR_annot
+  dittoSeq::dittoDimPlot(seu, "SingleR_annot", size = 0.7)
+  dittoSeq::dittoDimPlot(seu, "sample", size = 0.7)
+  dittoSeq::dittoBarPlot(seu, var = "SingleR_annot", group.by = "sample")
+  
+  cat("Saving celldex-annotated Seurat object to", out$seu_celldex_annot, "\n")
+  saveRDS(seu, file = out$seu_celldex_annot)
+  
   # -> HIF metagene
+  
+  # -> literature markers
+  
+  # checking that all markers have been found
+  unmatched_markers <- unlist(literature_markers)[
+    !(unlist(literature_markers) %in% unique(rownames(seu@assays$RNA)))
+  ]
+  if(length(unmatched_markers) > 0) { 
+    warning("Marker(s) ", paste(unmatched_markers, collapse = ", "), " not found!")
+  }
+  
+  # generate module scores
+  seu %>%
+    Seurat::AddModuleScore(features = literature_markers)
+  
+  # 7) ENRICHMENT ANALYSIS ----
 
-  # 6) DIFFERENTIAL GENE EXPRESSION
-
-  # 7) ENRICHMENT ANALYSIS
-
-  # 8) TRAJECTORY ANALYSIS
+  # 8) TRAJECTORY ANALYSIS ----
 
 }

@@ -7,7 +7,12 @@ define_out <- function(
   out <- list(
     base = "",
     args = "arguments_for_analyse_parse.R",
-    seu_pre_qc = "seu_pre_qc.rds"
+    seu_pre_qc = "seu_pre_qc.rds",
+    seu_post_filtering = "seu_post_filtering.rds",
+    seu_transformed = "seu_tranformed.rds",
+    seu_split_transformed = "seu_split_transformed.rds",
+    seu_umap = "seu_umap.rds",
+    seu_celldex_annot = "seu_celldex_annot.rds"
   )
   if (is.null(out_dir)) {
     out <- "out/" %>%
