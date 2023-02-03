@@ -1,21 +1,14 @@
 load_parse_to_seurat <-
-  function(experiment,
-           genome,
-           parse_dir,
-           parse_analysis_subdir,
+  function(dge_dir,
            min_genes_per_cell,
            min_cells_per_gene,
            sample_subset) {
 
-    # get data dir
-    data_dir <- paste(parse_dir, experiment, genome, parse_analysis_subdir,
-                       sep = "/")
-
     # read in DGE matrix
-    dge_mat <- Seurat::ReadParseBio(data_dir)
+    dge_mat <- Seurat::ReadParseBio(dge_dir)
 
     # read in cell metadata
-    cell_metadata <- paste0(data_dir, "cell_metadata.csv") %>%
+    cell_metadata <- paste0(dge_dir, "/cell_metadata.csv") %>%
       readr::read_csv(show_col_types = F) %>%
       tibble::column_to_rownames("bc_wells") %>%
       as.data.frame()

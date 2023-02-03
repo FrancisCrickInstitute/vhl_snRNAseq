@@ -9,3 +9,13 @@ greplany <- function(patterns, v) {
   }
   return(match)
 }
+
+# Get base_dir
+get_base_dir <- function() {
+  if (Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local") {
+    "/Volumes/TracerX/working/VHL_GERMLINE/tidda/"
+  } else {
+    "/camp/project/tracerX/working/VHL_GERMLINE/tidda/"
+  }
+}
+
