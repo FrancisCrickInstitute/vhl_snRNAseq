@@ -7,15 +7,6 @@ parse_pipeline_dir=$base_dir/parse_pipeline/
 cd $wkdir
 ml R/4.2.0-foss-2021b
 
-# generate runs.tsv file
-(
-  cd $parse_pipeline_dir/analysis/
-  find . -mindepth 5 -maxdepth 5 -type d |
-  grep ".*all-well/.*filtered$" \
-  > $wkdir/out/runs.tsv
-)
-Rscript src/get_runs.R
-
 # run
 cat out/runs.tsv | sed 1d |
 {

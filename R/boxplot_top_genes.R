@@ -17,10 +17,8 @@ boxplot_top_genes <- function(seu, n_genes = 20) {
   colnames(most_exp_df) <- c("perc_total", "gene")
 
   # boxplot with ggplot2
-  boxplot <-
-    ggplot2::ggplot(most_exp_df, ggplot2::aes(x = gene, y = perc_total)) +
+  most_exp_df %>%
+    ggplot2::ggplot(ggplot2::aes(x = gene, y = perc_total)) +
     ggplot2::geom_boxplot() +
     ggplot2::coord_flip()
-
-  return(boxplot)
 }

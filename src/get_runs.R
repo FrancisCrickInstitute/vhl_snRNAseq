@@ -7,16 +7,31 @@ if (Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local") {
 wkdir <- paste0(base_dir, "/vhl/")
 parse_pipeline_dir <- paste0(base_dir, "parse_pipeline")
 setwd(wkdir)
-library(magrittr)
 
 # runs
-runs <- readr::read_tsv("out/runs.tsv") %>%
-  dplyr::transmute(path = X1 %>% gsub("^\\.\\/", "", .)) %>%
-  tidyr::separate(path, into = c("experiment", "genome", "sublibrary", "parse_analysis_subdir"),
-                  sep = "/", remove = F, extra = "merge") %>%
-  dplyr::cross_join(dplyr::tibble(do_integration = c(T,F)))
+runs <- paste(
+  paste0("( cd ", parse_pipeline_dir, "/analysis/ ;"),
+  "find . -mindepth 5 -maxdepth 5 -type d |",
+  "grep '.*all-well/.*filtered$' )"
+) %>%
+  system(intern = T) %>%
+  # remove ./ at the beginning of every path
+  gsub("^\\.\\/", "", .) %>%
+  # convert vectorised bash output to tibble
+  { dplyr::tibble(path = .) } %>%
+  # convert nested subdirs to variables
+  # (each level corresponds to a parameters of the split-pipe run)
+  tidyr::separate(
+    path,
+    into = c("experiment", "genome", "sublibrary", "parse_analysis_subdir"),
+    sep = "/",
+    remove = F,
+    extra = "merge"
+  ) %>%
+  # add in integration option T/F
+  dplyr::cross_join(dplyr::tibble(do_integration = c(T, F)))
+# write to out/
 readr::write_tsv(runs, "out/runs.tsv")
-
 
 library(devtools) ; load_all()
 base_dir <- get_base_dir()

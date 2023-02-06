@@ -2,7 +2,8 @@ transcript_types.tsv
 https://sib-swiss.github.io/single-cell-training/2022.7/day1/analysis_tools_qc/
 
 hif_metagene.txt
-From email from Olivia Lombardi (print)
+https://www.ncbi.nlm.nih.gov/pmc/articles/PMC9869179/table/tbl1/?report=objectonly
+Table 1. Conserved HIF target genes and their inclusion in other hypoxia mRNA signatures
 
 literature_markers.tsv
 https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6104812/bin/NIHMS78997-supplement-Supplementary_tables.xlsx
