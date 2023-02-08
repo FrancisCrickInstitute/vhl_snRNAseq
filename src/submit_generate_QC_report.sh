@@ -1,6 +1,6 @@
 #!/bin/bash
 # create and submit the split-pipe comb sbatch script for each experiment / genome
-run_info=qc_${experiment}_${genome}_${sublibrary}_${parse_analysis_subdir/\//_}
+run_info=qc_${experiment}_${genome}_${sublibrary}_${parse_analysis_subdir/\//_}_int${do_integration}
 script=src/sbatch/sbatch_vhl_${run_info}.sh
 echo $run_info
 
@@ -24,11 +24,12 @@ echo "------------------------------"
 cd $(pwd) ; . src/config.sh
 
 # run generate_QC_report.R
-Rscript src/run_generate_QC_report.R \
+Rscript src/run_generate_qc_report.R \
   $experiment \
   $genome \
   $sublibrary \
-  $parse_analysis_subdir
+  $parse_analysis_subdir \
+  $do_integration
 EOF
 
 # submit the script

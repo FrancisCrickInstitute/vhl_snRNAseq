@@ -1,7 +1,8 @@
 #!/bin/bash
 
 # wk dir
-wd=/camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/
+base_dir=/camp/project/tracerX/working/VHL_GERMLINE/tidda/
+wd=$base_dir/vhl/
 cd $wd
 
 # packages

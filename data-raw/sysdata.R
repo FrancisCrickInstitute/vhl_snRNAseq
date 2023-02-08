@@ -4,7 +4,6 @@
 transcript_types <- readr::read_tsv("data/transcript_types.tsv")
 
 # HIF metagene
-hif_metagene <- readr::read_tsv("data/hif_metagene.txt", col_names = F)$X1
 
 # literature markers from PMC6104812
 literature_markers <- readr::read_tsv("data/literature_markers.tsv") %>%
@@ -13,10 +12,15 @@ literature_markers <- readr::read_tsv("data/literature_markers.tsv") %>%
                                         TRUE ~ Gene)) %>%
   { split(.$Gene, f = as.factor(.$Marker_of)) }
 
+# list of gene modules
+gene_modules <- list("tcell" = c("IL7R", "LTB", "TRAC", "CD3D"),
+                     "monocyte" = c("CD14", "CST3", "CD68", "CTSS"),
+                     "hif" = readr::read_tsv("data/hif_metagene.txt", col_names = F)$X1,
+                     pax8 = c("PAX8"))
 
 # save to sysdata
 usethis::use_data(transcript_types,
-                  hif_metagene,
                   literature_markers,
+                  gene_modules,
                   overwrite = TRUE,
                   internal = TRUE)
