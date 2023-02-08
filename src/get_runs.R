@@ -7,6 +7,7 @@ if (Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local") {
 wkdir <- paste0(base_dir, "/vhl/")
 parse_pipeline_dir <- paste0(base_dir, "parse_pipeline")
 setwd(wkdir)
+library(devtools) ; load_all()
 
 # runs
 runs <- paste(
@@ -27,19 +28,18 @@ runs <- paste(
     sep = "/",
     remove = F,
     extra = "merge"
-  ) %>%
+  )# %>%
   # add in integration option T/F
-  dplyr::cross_join(dplyr::tibble(do_integration = c(T, F)))
+  #dplyr::cross_join(dplyr::tibble(do_integration = c(T, F)))
 # write to out/
 readr::write_tsv(runs, "out/runs.tsv")
 
-library(devtools) ; load_all()
 base_dir <- get_base_dir()
 wkdir <- paste0(base_dir, "/vhl/")
 parse_pipeline_dir <- paste0(base_dir, "parse_pipeline")
 setwd(wkdir)
-runs <- readr::read_tsv("out/runs.tsv")
-
+runs <- readr::read_tsv("out/runs.tsv") %>%
+  dplyr::filter(genome=="hg38", do_integration==F)
 for(i in 1:nrow(runs)) {
   run = dplyr::filter(runs, dplyr::row_number() == nrow(runs) + 1 - i)
   cat(run$experiment, run$genome, run$sublibrary, run$parse_analysis_subdir, "\n")
@@ -54,7 +54,6 @@ for(i in 1:nrow(runs)) {
     sample_subset = NULL,
     do_timestamp = F,
     do_integration = run$do_integration)
-  if(length(dev.list())!=0) { dev.off() }
 }
 
 # runs %>% purrr::pwalk(function(...) {

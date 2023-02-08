@@ -11,7 +11,7 @@ generate_QC_report <- function(
     do_integration = F,
     integration_col = "sample") {
 
-  # testing: # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38_mm10";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims = 50;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = T;integration_col="sample";
+  # testing: # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims = 50;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = T;integration_col="sample";
   # testing: # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="comb"
 
   # cell quality control
@@ -22,6 +22,9 @@ generate_QC_report <- function(
   #    apoptosis (for scRNA-seq, not snRNA-seq)
   # -> high % globin and low % ribo suggests erythrocytes
 
+  # gridExtra must be loaded in the enrivonment
+  library(gridExtra)
+
   # set directories
   data_dir <- paste(parse_pipeline_dir, "analysis", experiment, genome, sublibrary, sep = "/")
   dge_dir <- paste(data_dir, parse_analysis_subdir, sep = "/")
@@ -31,10 +34,11 @@ generate_QC_report <- function(
 
   # LOAD DATA ----
 
-  # load parse output to seurat object, save to outdir
+  # load parse output to seurat object with no cut-offs, remove NAs, save to outdir
   seu <- load_parse_to_seurat(
     dge_dir, min_genes_per_cell = 0, min_cells_per_gene = 0, sample_subset
   )
+  seu <- subset(seu, subset = sample %in% seu$sample[!is.na(seu$sample)])
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 
   # sample groupings to check at clustering stage
@@ -266,21 +270,31 @@ generate_QC_report <- function(
   # clustering of different sample/patient/batch-level features in different reductions
   purrr::walk(groupings, function(grouping) {
     cat("\tPlotting PCA and UMAP vs", grouping, "\n")
-    redu_plots <- c("pca", "umap") %>%
-      purrr::map(function(redu) {
-        seu %>% Seurat::DimPlot(reduction = redu,
-                                group.by = grouping,
-                                raster = F)
-      })
-    # use `<<` for global assignment
-    plots[[paste0("reductions_vs_", grouping)]] <<- gridExtra::marrangeGrob(redu_plots, nrow = 2, ncol = 1)
+    purrr::walk(c("pca", "umap"), function(redu) {
+      # use `<<` for global assignment
+      if (is.numeric(seu@meta.data[,grouping])) {
+        p <- Seurat::FeaturePlot(object = seu,
+                            reduction = redu,
+                            features = grouping,
+                            raster = F)
+      } else {
+        p <- seu %>%
+          Seurat::DimPlot(reduction = redu,
+                          group.by = grouping,
+                          raster = F)
+      }
+      plots[[paste0(redu, "_vs_", grouping)]] <<- p
+    })
   })
 
   # save plots as pdf and list
   cat("Saving all plots...\n")
-  library(gridExtra)
+  if(length(dev.list()) != 0) { dev.off() }
   plots_grob <- marrangeGrob(grobs = plots, nrow = 1, ncol = 1)
   ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
-         width = 21, height = 20, units = "cm")
-  saveRDS(seu, file = paste0(out$base, "/qc_report_plots.rds"))
+         width = 20, height = 20, units = "cm")
+  if(length(dev.list()) != 0) { dev.off() }
+  saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
+
+  cat("DONE!\n\n")
 }
