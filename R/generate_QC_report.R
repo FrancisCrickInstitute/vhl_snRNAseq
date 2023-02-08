@@ -1,4 +1,4 @@
-generate_QC_report <- function(
+generate_qc_report <- function(
     experiment,
     parse_pipeline_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
     genome = "hg38",
