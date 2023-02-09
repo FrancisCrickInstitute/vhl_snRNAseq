@@ -9,8 +9,8 @@ cat << EOF > $script
 #SBATCH --job-name=parse_${run_info}
 #SBATCH --time=1-00:00:0
 #SBATCH --mem=50GB
-#SBATCH -o /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/parse_${run_info}_%j.out
-#SBATCH -e /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/parse_${run_info}_%j.err
+#SBATCH -o /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/parse_${run_info}.out
+#SBATCH -e /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/parse_${run_info}.err
 
 echo "------------------------------"
 echo "Experiment: $experiment"
@@ -18,6 +18,7 @@ echo "Genome: $genome"
 echo "Sublibrary: $sublibrary"
 echo "Parse analysis subdirectory: $parse_analysis_subdir"
 echo "Script: $script"
+echo "Job ID: %j"
 echo "------------------------------"
 
 # get directories

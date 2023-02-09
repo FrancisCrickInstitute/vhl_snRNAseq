@@ -17,7 +17,7 @@ cd /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/
 Rscript src/get_runs.R
 
 # run
-cat out/runs.tsv | sed 1d | 
+cat out/runs.tsv | sed 1d |
 {
   while read path experiment genome sublibrary parse_analysis_subdir do_integration ; do
     . src/submit_generate_qc_report.sh
