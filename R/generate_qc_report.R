@@ -13,7 +13,7 @@ generate_qc_report <- function(experiment,
   args <- as.list(environment())
 
   # testing: setwd # setwd(paste0(ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/working/VHL_GERMLINE/tidda/","/camp/project/tracerX/working/VHL_GERMLINE/tidda/"),"vhl/"));
-  # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims = 50;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = T;integration_col="sample";
+  # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims = 50;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
   # testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";do_integration=F
   # testing: args  # library(devtools);load_all();args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv()); parse_pipeline_dir=paste0(get_base_dir(), "/parse_pipeline/")
 
@@ -60,7 +60,7 @@ generate_qc_report <- function(experiment,
 
   # sample stats/groups to check at clustering stage
   md_groupings <- c("date_prep", "patient_id", "rin", "sample_type", "size")
-  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin") %>%
+  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", md_groupings) %>%
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
     { if (grepl("hg38", genome)) c(., "Phase") else . }
 
@@ -100,6 +100,7 @@ generate_qc_report <- function(experiment,
       ),
       sample_label = paste0(sample, "_", sample_type_code)
     )
+
   # add to seu@meta.data
   seu@meta.data <- seu@meta.data %>%
     dplyr::left_join(sample_metadata,
@@ -179,8 +180,8 @@ generate_qc_report <- function(experiment,
   cat("Calculating abundance of different transcript types...\n")
   purrr::pwalk(transcript_types, function(...) {
     tt <- tibble::tibble(...)
-    cat("\tCalculating %", tt$name, "genes...\n")
-    cat("\t", tt$message, "\n\n")
+    cat("Calculating %", tt$name, "genes...\n")
+    cat(tt$message, "\n")
     # use `<<` for global assignment
     seu <<- seu %>%
       Seurat::PercentageFeatureSet(pattern = tt$pattern,
@@ -300,36 +301,63 @@ generate_qc_report <- function(experiment,
   cat("Plotting elbow plot...\n")
   plots[["pca_elbow"]] <- Seurat::ElbowPlot(seu, ndims = 50)
 
-  # NON-LINEAR DIMENSIONALITY REDUCTION (UMAP) ----
+  # NON-LINEAR DIMENSIONALITY REDUCTION (UMAP, t-SNE) ----
 
-  # run umap
+  # run t-SNE and UMAP
+  seu <- Seurat::RunTSNE(seu)
   seu <- Seurat::RunUMAP(seu, dims = 1:n_dims)
 
   # CLUSTERING ----
 
-  # cluster umap at different resolutions
-  cat("Getting UMAP at different resolutions...\n")
+  # cluster data at different resolutions
+  cat("Clustering data at different resolutions...\n")
   resolutions <- seq(0.1, 0.8, by = 0.1)
+
+  # compute k.param nearest neighbours based on euclidean distance in PCA space
+  # and check shared nearest neighbours between any 2 cells (Jaccard similarity)
   seu <- Seurat::FindNeighbors(seu, dims = 1:n_dims)
+
+  # identify clusters of cells by a shared nearest neighbours modularity
+  # optimisation based clustering algorithm
   seu <- Seurat::FindClusters(seu, resolution = resolutions)
   saveRDS(seu, file = paste0(out$base, "/seu_transformed_and_clustered.rds"))
 
-  # cluster tree plot of different resolutions
-  cat("Plotting clustering tree for UMAP at different resolutions...\n")
+  # plot clustering of reductions at different resolutions
+  cat("Plotting reductions of clusters at different resolutions...\n")
+  clustered_reductions <- list()
+  purrr::walk(resolutions, function(res) {
+    purrr::walk(Seurat::Reductions(seu), function(redu) {
+      title <- paste0(redu, "_by_cluster_res_", res)
+      clustered_reductions[[title]] <<-
+        dittoSeq::dittoDimPlot(
+          seu,
+          paste0(Seurat::DefaultAssay(seu), "_snn_res.", res),
+          reduction.use = redu,
+          size = 0.5,
+          raster = F,
+          legend.show = F,
+          show.axes.numbers = F,
+          show.grid.lines = F,
+          main = gsub("_", " ", title)
+        )
+    })
+  })
+
+  # convert to grob
+  clustered_reductions <- marrangeGrob(
+    grobs = clustered_reductions,
+    nrow = 8,
+    ncol = 3,
+    layout_matrix = matrix(1:24, 8, 3, TRUE)
+  )
+
+  # cluster tree plot of increasing resolutions
+  cat("Plotting clustering tree at different resolutions...\n")
   library(clustree)
   snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
-  plots[["clustering_tree"]] <- clustree::clustree(seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
-                                                   prefix = snn_res_prefixes)
-
-  # umap plot at different resolutions
-  cat("Plotting UMAP at different resolutions...\n")
-  for (res in resolutions) {
-    plots[[paste0("umap_by_cluster_res.", res)]] <- Seurat::DimPlot(
-      seu,
-      group.by = paste0(Seurat::DefaultAssay(seu), "_snn_res.", res),
-      raster = F
-    )
-  }
+  plots[["clustering_tree"]] <- clustree::clustree(
+    seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
+    prefix = snn_res_prefixes)
 
   # clustering of different sample/patient/batch-level features in different reductions
   plots[["umap_vs_sample_label"]] <- dittoSeq::dittoDimPlot(seu,
@@ -337,16 +365,50 @@ generate_qc_report <- function(experiment,
                                                             reduction.use = "umap",
                                                             raster = F)
   # plot all reduction / grouping projections, side-by-side with sample annots for comparison
+  groupings_vs_reductions <- list()
   purrr::walk(groupings, function(grouping) {
-    cat("\tPlotting PCA and UMAP vs", grouping, "\n")
-    purrr::walk(c("pca", "umap"), function(redu) {
-      # use `<<` for global assignment
-      plots[[paste0(redu, "_vs_", grouping)]] <<-
-        dittoSeq::dittoDimPlot(seu,
+    cat("Plotting reductions vs", grouping, "\n")
+    purrr::walk(Seurat::Reductions(seu), function(redu) {
+      title <- paste0(redu, "_vs_", grouping)
+      p <- dittoSeq::dittoDimPlot(seu,
                                grouping,
                                reduction.use = redu,
-                               raster = F) +
-        plots[["umap_vs_sample_label"]]
+                               size = 0.5,
+                               raster = F,
+                               show.axes.numbers = F,
+                               show.grid.lines = F,
+                               main = gsub("_", " ", title))
+      groupings_vs_reductions[[paste0(grouping, "_legend")]] <<- lemon::g_legend(p)
+      groupings_vs_reductions[[title]] <<- p + ggplot2::theme(legend.position = "none")
+    })
+  })
+
+  # convert to grob
+  groupings_vs_reductions_grob <- marrangeGrob(
+    grobs = groupings_vs_reductions,
+    nrow = length(groupings),
+    ncol = length(Seurat::Reductions(seu)),
+    layout_matrix = matrix(1:length(groupings_vs_reductions),
+                           length(groupings),
+                           length(Seurat::Reductions(seu)) + 1,
+                           TRUE)
+  )
+
+  purrr::walk(resolutions, function(res) {
+    purrr::walk(Seurat::Reductions(seu), function(redu) {
+      title <- paste0(redu, "_by_cluster_res_", res)
+      clustered_reductions[[title]] <<-
+        dittoSeq::dittoDimPlot(
+          seu,
+          paste0(Seurat::DefaultAssay(seu), "_snn_res.", res),
+          reduction.use = redu,
+          size = 0.5,
+          raster = F,
+          legend.show = F,
+          show.axes.numbers = F,
+          show.grid.lines = F,
+          main = gsub("_", " ", title)
+        )
     })
   })
 
@@ -417,11 +479,13 @@ generate_qc_report <- function(experiment,
   if (length(dev.list()) != 0) { dev.off() }
   saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
 
+  # TODO: plot clustered_reductions too!
+
   # TODO: GENE ONTOLOGY ----
-  #
-  # # choose a cluster resolution
-  # clust_res <- 0.3
-  # deg_list <- split(rownames(seu), seu[, paste0(snn_res_prefixes, clust_res)])
+
+  # choose a cluster resolution
+  clust_res <- 0.3
+  deg_list <- split(rownames(seu), seu[, paste0(snn_res_prefixes, clust_res)])
 
 
 
