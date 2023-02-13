@@ -17,14 +17,6 @@ generate_qc_report <- function(experiment,
   # testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";do_integration=F
   # testing: args  # library(devtools);load_all();args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv()); parse_pipeline_dir=paste0(get_base_dir(), "/parse_pipeline/")
 
-  # cell quality control
-  # -> unusually high transcript/gene counts indicate multiplets
-  # -> unusually low transcript/gene counts indicate barcoding of cells with
-  #    damaged membranes (uninformative)
-  # -> high % mito genes indicates death / loss of cytoplasmic RNA / increased
-  #    apoptosis (for scRNA-seq, not snRNA-seq)
-  # -> high % globin and low % ribo suggests erythrocytes
-
   # gridExtra must be loaded in the environment
   library(gridExtra)
 
@@ -67,9 +59,8 @@ generate_qc_report <- function(experiment,
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 
   # sample stats/groups to check at clustering stage
-  groupings <-
-    c("sample", "percent_mito", "percent_ribo", "percent_globin",
-      "date_prep", "patient_id", "rin", "sample_type", "size") %>%
+  md_groupings <- c("date_prep", "patient_id", "rin", "sample_type", "size")
+  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin") %>%
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
     { if (grepl("hg38", genome)) c(., "Phase") else . }
 
@@ -120,13 +111,19 @@ generate_qc_report <- function(experiment,
     dplyr::bind_rows(
       sample_metadata %>%
         tidyr::pivot_longer(
-          cols = tidyr::all_of(md_groupings) & where(is.numeric),
+          cols = tidyr::any_of(md_groupings) & where(is.numeric),
           names_to = "statistic"
         ) %>%
         dplyr::select(statistic, sample, value)
     )
 
   # CELL AND GENE SUMMARY STATISTICS ----
+  # -> unusually high transcript/gene counts indicate multiplets
+  # -> unusually low transcript/gene counts indicate barcoding of cells with
+  #    damaged membranes (uninformative)
+  # -> high % mito genes indicates death / loss of cytoplasmic RNA / increased
+  #    apoptosis (for scRNA-seq, not snRNA-seq)
+  # -> high % globin and low % ribo suggests erythrocytes
 
   # plot summary stats
   cat("Plotting summary stats...\n")
@@ -429,5 +426,7 @@ generate_qc_report <- function(experiment,
 
 
   cat("\nDONE!\n\n")
+
+  return(seu)
 
 }
