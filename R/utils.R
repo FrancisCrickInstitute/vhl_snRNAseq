@@ -19,3 +19,13 @@ get_base_dir <- function() {
   }
 }
 
+# Get cluster centroids from a Seurat object
+get_centroids <- function(seu, reduction, ...) {
+  dplyr::tibble(
+    x = seu@reductions[[reduction]]@cell.embeddings[,1],
+    y = seu@reductions[[reduction]]@cell.embeddings[,2],
+    seu@meta.data
+  ) %>%
+    dplyr::group_by(...) %>%
+    dplyr::summarise(x = median(x), y = median(y))
+}

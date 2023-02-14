@@ -3,7 +3,7 @@ generate_qc_report <- function(experiment,
                                genome = "hg38",
                                sublibrary = "comb",
                                parse_analysis_subdir = "/all-well/DGE_unfiltered/",
-                               n_dims = 50,
+                               n_dims = NULL,
                                clustering_resolutions = seq(0.1, 0.8, by = 0.1),
                                final_clustering_resolution = NULL,
                                out_dir = NULL,
@@ -15,9 +15,10 @@ generate_qc_report <- function(experiment,
   args <- as.list(environment())
 
   # testing: setwd # setwd(paste0(ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/working/VHL_GERMLINE/tidda/","/camp/project/tracerX/working/VHL_GERMLINE/tidda/"),"vhl/"));
-  # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims = 50;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
+  # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
   # testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";do_integration=F
   # testing: args  # library(devtools);load_all();args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv()); parse_pipeline_dir=paste0(get_base_dir(), "/parse_pipeline/")
+  # testing: archived # data_dir="/Volumes/TracerX/working/VHL_GERMLINE/tidda//parse_pipeline/archive/230209////analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101";dge_dir="/Volumes/TracerX/working/VHL_GERMLINE/tidda//parse_pipeline/archive/230209////analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered";sample_metadata$sample<-c("N090_V1027"  ,  "N090_V1024A" ,  "K1026_T2D_CL" ,"Mouse_nuclei")
 
   # gridExtra must be loaded in the environment
   library(gridExtra)
@@ -62,7 +63,8 @@ generate_qc_report <- function(experiment,
 
   # sample stats/groups to check at clustering stage
   md_groupings <- c("date_prep", "patient_id", "rin", "sample_type", "size")
-  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", md_groupings) %>%
+  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "multiplet_class",
+                 md_groupings) %>%
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
     { if (grepl("hg38", genome)) c(., "Phase") else . }
 
@@ -102,6 +104,7 @@ generate_qc_report <- function(experiment,
       ),
       sample_label = paste0(sample, "_", sample_type_code)
     )
+  # sample_metadata$sample<-c("N090_V1027"  ,  "N090_V1024A" ,  "K1026_T2D_CL" ,"Mouse_nuclei")
 
   # add to seu@meta.data
   seu@meta.data <- seu@meta.data %>%
@@ -185,17 +188,18 @@ generate_qc_report <- function(experiment,
   seu$multiplet_class <- seu_dbl$scDblFinder.class
 
   # plot doublets
-  dittoSeq::dittoFreqPlot(seu, x.var = "sample", y.var = "nCount_RNA")
-
   plots[["doublets_per_sample"]] <- seu@meta.data %>%
-    ggplot2::ggplot(ggplot2::aes(y = nCount_RNA, x = sample, colour = multiplet_class)) +
-    ggplot2::geom_jitter(height = 0) +
+    dplyr::group_by(sample) %>%
+    dplyr::mutate(n_doublets = sum(multiplet_class == "doublet")) %>%
+    tidyr::pivot_longer(c("nFeature_RNA", "nCount_RNA", "n_doublets")) %>%
+    ggplot2::ggplot(ggplot2::aes(y = value, x = sample,
+                                 colour = multiplet_class)) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(multiplet_class != "doublet"), height = 0) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(multiplet_class == "doublet"), height = 0) +
     ggplot2::theme_bw() +
     ggplot2::labs(title = "detected doublets in each sample (using scDblFinder)") +
-    ggplot2::scale_colour_manual(values = dittoSeq::dittoColors())
-
-  # remove doublets
-  seu <- subset(seu, multiplet_class == "singlet")
+    ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()) +
+    ggplot2::facet_wrap(~ name, scales = "free")
 
   # get proportions of relevant transcript types
   cat("Calculating abundance of different transcript types...\n")
@@ -304,6 +308,48 @@ generate_qc_report <- function(experiment,
   cat("Running PCA...\n")
   seu <- Seurat::RunPCA(seu)
 
+  # choose dimensionality (final_n_dims) of the dataset
+  if(!is.null(n_dims)) {
+
+    # n_dims passed by the user
+    final_n_dims <- n_dims
+
+  } else {
+
+    # test dimensionality of the dataset using intrinsicDimension package
+    n_dims_iD <- intrinsicDimension::maxLikGlobalDimEst(
+      seu@reductions$pca@cell.embeddings,
+      k = 10
+    )$dim.est %>% round(0)
+
+    # better to be more generous with the number of dimensions
+    # therefore double dimension cutoff suggested by intrinsicDimension
+    generous_n_dims <- round(2 * n_dims_iD, 0)
+    final_n_dims <- generous_n_dims
+
+  }
+
+  # elbow plot
+  cat("Plotting elbow plot...\n")
+  plots[["pca_elbow"]] <- Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
+    ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims_iD, colour = "intrisicDimensions"),
+                        linetype = "dashed") &
+    ggplot2::geom_vline(ggplot2::aes(xintercept = generous_n_dims, colour = "generous (iD x 2)"),
+                        linetype = "dashed") &
+    ggplot2::scale_colour_manual(
+      name = "n_dims cut-off",
+      values = c(user_provided = dittoSeq::dittoColors()[[1]],
+                 intrisicDimensions = dittoSeq::dittoColors()[[2]],
+                 `generous (iD x 2)` = dittoSeq::dittoColors()[[3]])
+    ) &
+    ggplot2::theme(legend.position = c(0.7, 0.9),
+                   legend.background = element_rect(fill = "white"))
+  if(!is.null(n_dims)) {
+    plots[["pca_elbow"]] <- plots[["pca_elbow"]] &
+      ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims, colour = "user_provided"),
+                          linetype = "dashed")
+  }
+
   # plot pca dims
   cat("Plotting principle components...\n")
   plots[["pca_dim_loadings"]] <-
@@ -311,28 +357,32 @@ generate_qc_report <- function(experiment,
   plots[["pca_dim_heatmap"]] <-
     Seurat::DimHeatmap(
       seu,
-      dims = 1:15,
+      dims = 1:final_n_dims,
       cells = 500,
       balanced = TRUE,
       raster = F,
       fast = F
     )
 
-  # elbow plot
-  cat("Plotting elbow plot...\n")
-  plots[["pca_elbow"]] <- Seurat::ElbowPlot(seu, ndims = 50)
-
   # NON-LINEAR DIMENSIONALITY REDUCTION (UMAP, t-SNE) ----
 
   # run t-SNE and UMAP
   seu <- Seurat::RunTSNE(seu)
-  seu <- Seurat::RunUMAP(seu, dims = 1:n_dims)
+  seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 
-  # projection of different sample/patient/batch-level features in different reductions
+  # plot projection of different sample features in different reductions
   plots[["umap_vs_sample_label"]] <- dittoSeq::dittoDimPlot(seu,
                                                             "sample_label",
                                                             reduction.use = "umap",
                                                             raster = F)
+
+  # split out sample clusters, side-by-side
+  plots[["umap_split_by_patient"]] <-
+    dittoSeq::dittoDimPlot(seu,
+                           "sample_label",
+                           reduction.use = "umap",
+                           split.by = "patient_id")
+
   # plot all reduction / grouping projections, side-by-side with sample annots for comparison
   groupings_vs_reductions <- list()
   purrr::walk(groupings, function(grouping) {
@@ -370,7 +420,7 @@ generate_qc_report <- function(experiment,
 
   # compute k.param nearest neighbours based on euclidean distance in PCA space
   # and check shared nearest neighbours between any 2 cells (Jaccard similarity)
-  seu <- Seurat::FindNeighbors(seu, dims = 1:n_dims)
+  seu <- Seurat::FindNeighbors(seu, dims = 1:final_n_dims)
 
   # identify clusters of cells by a shared nearest neighbours modularity
   # optimisation based clustering algorithm
@@ -407,7 +457,7 @@ generate_qc_report <- function(experiment,
   })
 
   # convert to grob
-  clustered_reductions <- marrangeGrob(
+  clustered_reductions_grob <- marrangeGrob(
     grobs = clustered_reductions,
     nrow = length(clustering_resolutions),
     ncol = length(Seurat::Reductions(seu)),
@@ -417,95 +467,168 @@ generate_qc_report <- function(experiment,
                            TRUE)
   )
 
-  purrr::walk(clustering_resolutions, function(res) {
-    purrr::walk(Seurat::Reductions(seu), function(redu) {
-      title <- paste0(redu, "_by_cluster_res_", res)
-      clustered_reductions[[title]] <<-
-        dittoSeq::dittoDimPlot(
+  # choose a resolution
+  if(!is.null(final_clustering_resolution)) { # final_clustering_resolution=0.3
+
+    # define clusters at final resolution
+    seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
+
+    # plot sample/cluster proportions
+    samples_by_clusters_bar <-
+      dittoSeq::dittoBarPlot(seu,
+                             var = "cluster",
+                             scale = "count",
+                             group.by = "sample",
+                             ) +
+      ggplot2::theme(legend.position = "left") +
+      dittoSeq::dittoBarPlot(seu,
+                             var = "sample",
+                             scale = "count",
+                             group.by = "cluster") +
+      patchwork::plot_layout(ncol = 2, widths = c(
+        seu$sample %>% unique() %>% length(),
+        seu$cluster %>% unique() %>% length()
+      ))
+
+    # ANNOTATION ----
+
+    # gene modules scoring
+    gene_modules %>% names %>%
+      purrr::walk(function(module) {
+        cat(module, "\n")
+        seu <<- Seurat::AddModuleScore(
           seu,
-          paste0(Seurat::DefaultAssay(seu), "_snn_res.", res),
-          reduction.use = redu,
-          size = 0.5,
-          raster = F,
-          legend.show = F,
-          show.axes.numbers = F,
-          show.grid.lines = F,
-          main = gsub("_", " ", title)
+          features = list(gene_modules[[module]]),
+          name = module,
+          nbin = 10
         )
-    })
-  })
+        # umap
+        plots[[paste0("umap_vs_", module, "_module_score")]] <<-
+          dittoSeq::dittoDimPlot(seu,
+                                 paste0(module, "1"),
+                                 main = paste0(module, " module (n=", length(gene_modules[[module]]), ")")) +
+          plots[["umap_vs_sample_label"]]
+        # ridgeplot
+        plots[[paste0(module, "_module_score_vs_sample_type_ridge")]] <<-
+          dittoSeq::dittoRidgePlot(seu, paste0(module, "1"), group.by = "sample_type")
+      })
 
-  # ANNOTATION ----
+    # celldex annotations from the human primary cell atlas
+    human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
+    seu_singler <- SingleR::SingleR(
+      test = Seurat::GetAssayData(seu, slot = "data"),
+      ref = human_primary_ref,
+      labels = human_primary_ref$label.main
+    )
 
-  # gene modules scoring
-  gene_modules %>% names %>%
-    purrr::walk(function(module) {
-      cat(module, "\n")
-      seu <<- Seurat::AddModuleScore(
-        seu,
-        features = list(gene_modules[[module]]),
-        name = module,
-        nbin = 10
+    # plot heatmap of annotation scores
+    plots[["singler_annots_heatmap"]] <-
+      SingleR::plotScoreHeatmap(
+        seu_singler,
+        annotation_col = data.frame(
+          patient = seu$patient_id,
+          sample_type = seu$sample_type
+        )
       )
-      # umap
-      plots[[paste0("umap_vs_", module, "_module_score")]] <<-
-        dittoSeq::dittoDimPlot(seu,
-                               paste0(module, "1"),
-                               main = paste0(module, " module (n=", length(gene_modules[[module]]), ")")) +
-        plots[["umap_vs_sample_label"]]
-      # ridgeplot
-      plots[[paste0(module, "_module_score_vs_sample_type_ridge")]] <<-
-        dittoSeq::dittoRidgePlot(seu, paste0(module, "1"), group.by = "sample_type")
-    })
 
-  # celldex annotations from the human primary cell atlas
-  human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
-  seu_SingleR <- SingleR::SingleR(
-    test = Seurat::GetAssayData(seu, slot = "data"),
-    ref = human_primary_ref,
-    labels = human_primary_ref$label.main
-  )
-  plots[["singleR_annots_heatmap"]] <-
-    SingleR::plotScoreHeatmap(seu_SingleR)
-  plots[["singleR_annots_delta_dist"]] <-
-    SingleR::plotDeltaDistribution(seu_SingleR)
+    # plot delta of cell type annotations
+    plots[["singler_annots_delta_dist"]] <-
+      SingleR::plotDeltaDistribution(seu_singler)
 
-  # add labels
-  seu$SingleR_annot <- seu_SingleR %>%
-    dplyr::as_tibble() %>%
-    dplyr::group_by(labels) %>%
-    dplyr::transmute(n = dplyr::n(),
-                     SingleR_annot = replace(labels, n < 10, "none")) %>%
-    dplyr::pull(SingleR_annot)
+    # add cell type annotations
+    seu$singler_annot <- seu_singler %>%
+      dplyr::as_tibble() %>%
+      dplyr::group_by(labels) %>%
+      # (remove cell types with less than 10 cells)
+      dplyr::transmute(n = dplyr::n(),
+                       singler_annot = replace(labels, n < 10, "none")) %>%
+      dplyr::pull(singler_annot)
 
-  plots[["umap_vs_singleR_annot"]] <-
-    dittoSeq::dittoDimPlot(seu, "SingleR_annot", size = 0.7) +
-    plots[["umap_vs_sample_type"]]
-  plots[["singleR_annot_bar"]] <- dittoSeq::dittoBarPlot(
-    seu,
-    var = "SingleR_annot",
-    group.by = "sample",
-    split.by = c("sample_type"),
-    split.adjust = list(scales = "free"),
-    split.nrow = 1
-  )
+    # add cell type annotation labels for plotting
+    seu$singler_annot_label <- seu@meta.data %>%
+      dplyr::group_by(cluster, singler_annot) %>%
+      dplyr::count() %>%
+      dplyr::group_by(cluster) %>%
+      dplyr::mutate(total = sum(n),
+                    prop = round(n / sum(n) * 100, 0),
+                    label = paste0(singler_annot, " (", prop, "%)")) %>%
+      dplyr::filter(prop == max(prop) & prop > 50 | max(prop) < 50 & rank(-prop) <= 2) %>%
+      dplyr::summarise(label = paste0("cluster ", unique(cluster), " (n = ", unique(total), ")\n", paste(label, collapse = "\n"))) %>%
+      {dplyr::left_join(seu@meta.data[, "cluster", drop = F], multiple = "all", .)} %>%
+      dplyr::pull(label)
 
-  # save annotated seu
-  saveRDS(seu, file = paste0(out$base, "/seu_annotated.rds"))
+    # plot cell types against reduction
+    plots[["umap_vs_singler_annot"]] <-
+      dittoSeq::dittoDimPlot(seu, "singler_annot", size = 0.7) +
+      ggplot2::geom_label(
+        data = seu@meta.data %>%
+          dplyr::right_join(get_centroids(seu, "umap", cluster)) %>%
+          dplyr::distinct(cluster, singler_annot_label, x, y),
+        ggplot2::aes(x, y, label = singler_annot_label),
+        size = 3, fill = 'white', color = 'black', alpha = 0.5, label.size = 0,
+        show.legend = FALSE, fontface = "bold",
+        vjust = "inward", hjust = "inward"
+      ) +
+      ggplot2::labs(title = "majority celldex annotation(s) per cluster") +
+      plots[["umap_vs_sample_label"]]
 
-  # save plots as pdf and list
-  cat("Saving all plots to", paste0(out$base, "/qc_report_plots.pdf"), "...\n")
-  if (length(dev.list()) != 0) { dev.off() }
-  plots_grob <- marrangeGrob(grobs = plots, nrow = 1, ncol = 1)
-  ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
-         width = 20, height = 20, units = "cm")
-  if (length(dev.list()) != 0) { dev.off() }
-  saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
-  # TODO: add clustered_reductions and groupings_vs_reductions to output
+    # plot cell type composition of samples
+    plots[["singler_annot_bar"]] <-
+      dittoSeq::dittoBarPlot(
+        seu,
+        var = "singler_annot",
+        group.by = "sample",
+        scale = "count",
+        legend.show = F
+      ) +
+      dittoSeq::dittoBarPlot(
+        seu,
+        var = "singler_annot",
+        group.by = "cluster",
+        scale = "count"
+      ) +
+      patchwork::plot_layout(
+        ncol = 2,
+        widths = c(seu$sample %>% dplyr::n_distinct(),
+                   seu$cluster %>% dplyr::n_distinct())
+      )
 
-  # TODO: GENE ONTOLOGY ----
+    # alluvial plots
+    plots[["alluvial_sample_cluster_singler"]] <- seu@meta.data %>%
+      dplyr::group_by(sample, cluster, singler_annot) %>%
+      dplyr::count() %>%
+      dplyr::ungroup() %>%
+      ggforce::gather_set_data(1:3) %>%
+      dplyr::mutate(x = dplyr::case_when(x == 1 ~ "sample",
+                                         x == 2 ~ "cluster",
+                                         x == 3 ~ "singler_annotation") %>%
+                      factor(levels = c("sample", "cluster", "singler_annotation"))) %>%
+      ggplot2::ggplot(ggplot2::aes(
+                        x = x,
+                        id = id,
+                        split = y,
+                        value = n
+                      )) +
+      ggforce::geom_parallel_sets(ggplot2::aes(fill = cluster),
+                                  axis.width = 0.15,
+                                  alpha = 0.75) +
+      ggforce::geom_parallel_sets_axes(fill = "lightgrey",
+                                       axis.width = 0.15) +
+      ggforce::geom_parallel_sets_labels(angle = 0,
+                                         nudge_x = c(
+                                           rep(-0.3, dplyr::n_distinct(seu$sample)),
+                                           rep(0, dplyr::n_distinct(seu$cluster)),
+                                           rep(0.3, dplyr::n_distinct(seu$singler_annot))
+                                         )) +
+      ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()) +
+      ggplot2::theme_void() +
+      ggplot2::theme(legend.position = "none",
+                     axis.text.x = element_text(face = "bold", size = 15))
 
-  if(!is.null(final_clustering_resolution)) { # final_clustering_resolution = 0.3
+    # save annotated seu
+    saveRDS(seu, file = paste0(out$base, "/seu_annotated.rds"))
+
+    # TODO: GENE ONTOLOGY ----
 
     # set identities based on the final clustering resolution
     seu <- Seurat::SetIdent(
@@ -522,11 +645,19 @@ generate_qc_report <- function(experiment,
     # (ranks pathways based on their expression difference)
     ReactomeGSA::plot_gsva_heatmap(gsva_result, max_pathways = 15)
 
+
   }
-  # choose a cluster resolution
-  deg_list <- split(rownames(seu), seu[, paste0(snn_res_prefixes, clust_res)])
 
-
+  # SAVE PLOTS ----
+  # save plots as pdf and list
+  cat("Saving all plots to", paste0(out$base, "/qc_report_plots.pdf"), "...\n")
+  if (length(dev.list()) != 0) { dev.off() }
+  plots_grob <- marrangeGrob(grobs = plots, nrow = 1, ncol = 1)
+  ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
+         width = 20, height = 20, units = "cm")
+  if (length(dev.list()) != 0) { dev.off() }
+  saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
+  # TODO: add clustered_reductions and groupings_vs_reductions to output
 
   cat("\nDONE!\n\n")
 
