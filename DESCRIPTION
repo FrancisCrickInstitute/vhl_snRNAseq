@@ -16,14 +16,18 @@ Imports:
     cowplot,
     dittoSeq,
     dplyr,
+    ggforce,
     ggplot2,
     gridExtra,
+    intrinsicDimension,
     lemon,
     magrittr,
     Matrix,
+    patchwork,
     pheatmap,
     purrr,
     readr,
+    scDblFinder,
     Seurat,
     SingleR
 Depends: 

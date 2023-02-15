@@ -1,8 +1,16 @@
+# min_nFeature_RNA - passed to SeuratObject::CreateAssayObject() min.features argument
 generate_qc_report <- function(experiment,
                                parse_pipeline_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
                                genome = "hg38",
                                sublibrary = "comb",
                                parse_analysis_subdir = "/all-well/DGE_unfiltered/",
+                               do_filtering = T,
+                               remove_doublets = T,
+                               min_cells_per_gene = 3,
+                               max_nCount_RNA = NULL,
+                               min_nFeature_RNA = NULL,
+                               max_nFeature_RNA = NULL,
+                               max_percent_mito = NULL,
                                n_dims = NULL,
                                clustering_resolutions = seq(0.1, 0.8, by = 0.1),
                                final_clustering_resolution = NULL,
@@ -14,122 +22,67 @@ generate_qc_report <- function(experiment,
   # capture arguments
   args <- as.list(environment())
 
+  # test runs
   # testing: setwd # setwd(paste0(ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/working/VHL_GERMLINE/tidda/","/camp/project/tracerX/working/VHL_GERMLINE/tidda/"),"vhl/"));
-  # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
+  # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");do_filtering=T;remove_doublets = T;min_cells_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
   # testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";do_integration=F
   # testing: args  # library(devtools);load_all();args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv()); parse_pipeline_dir=paste0(get_base_dir(), "/parse_pipeline/")
   # testing: archived # data_dir="/Volumes/TracerX/working/VHL_GERMLINE/tidda//parse_pipeline/archive/230209////analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101";dge_dir="/Volumes/TracerX/working/VHL_GERMLINE/tidda//parse_pipeline/archive/230209////analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered";sample_metadata$sample<-c("N090_V1027"  ,  "N090_V1024A" ,  "K1026_T2D_CL" ,"Mouse_nuclei")
 
-  # gridExtra must be loaded in the environment
+  # gridExtra and clustree must be loaded in the environment due to bugs
+  library(clustree)
   library(gridExtra)
 
-  # set directories
-  data_dir <-
-    paste(parse_pipeline_dir,
-          "analysis",
-          experiment,
-          genome,
-          sublibrary,
-          sep = "/")
-  dge_dir <- paste(data_dir, parse_analysis_subdir, sep = "/")
-  out <-
-    define_out(
-      experiment,
-      genome,
-      sublibrary,
-      parse_analysis_subdir,
-      out_dir,
-      do_timestamp,
-      do_integration
-    )
+  # set ggplot theme, initiate plots list
   plots <- list()
+  ggplot2::theme_set(ggplot2::theme_bw())
+  ditto_colours <- list(scale_fill_manual(values = dittoSeq::dittoColors()),
+                        scale_colour_manual(values = dittoSeq::dittoColors()))
+
+  # set directories
+  data_dir <- paste(parse_pipeline_dir, "analysis", experiment, genome, sublibrary, sep = "/")
+  dge_dir <- paste(data_dir, parse_analysis_subdir, sep = "/")
+  out <- define_out(experiment, genome, sublibrary, parse_analysis_subdir, out_dir,
+                    do_filtering, do_integration, do_timestamp)
 
   # save arguments
   if("args" %in% ls()) { dput(args, paste0(out$base, "/args_for_generate_qc_report.R")) }
 
   # LOAD DATA ----
 
-  # load parse output to seurat object with no cut-offs, remove NAs, save to outdir
+  # load parse pipeline output to seurat object with no cut-offs, remove sample
+  # NAs, add sample_metadata, optionally subset samples
   seu <- load_parse_to_seurat(
     dge_dir,
-    min_genes_per_cell = 0,
+    min_nFeature_RNA = 0,
     min_cells_per_gene = 0,
-    sample_subset
-  )
-  # remove NA samples
-  seu <- subset(seu, subset = sample %in% seu$sample[!is.na(seu$sample)])
+    sample_subset,
+    remove_na_samples = T,
+    do_add_sample_metadata = T,
+    parse_pipeline_dir,
+    experiment
+  ) # temporary sample names patch: # seu@misc$sample_metadata$sample<-seu@misc$sample_metadata$sample %>% gsub("V12", "V102", .);seu$sample<-seu$sample%>% gsub("V12", "V102", .)
+
   # save seu object
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 
-  # sample stats/groups to check at clustering stage
+  # sample groupings to check at clustering stage
   md_groupings <- c("date_prep", "patient_id", "rin", "sample_type", "size")
   groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "multiplet_class",
                  md_groupings) %>%
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
     { if (grepl("hg38", genome)) c(., "Phase") else . }
 
-  # sample stats of interest
-  summary_stats <-
-    readr::read_csv(paste0(data_dir, "/agg_samp_ana_summary.csv"),
-                    show_col_types = FALSE) %>%
-    tidyr::pivot_longer(cols = -statistic, names_to = "sample") %>%
-    dplyr::mutate(statistic = statistic %>% gsub(paste0(genome, "\\_"), "", .)) %>%
-    dplyr::filter(
-      statistic %in% c(
-        "median_tscp_per_cell",
-        "median_genes_per_cell",
-        "tso_fraction_in_read1",
-        "fraction_tscp_in_cells"
-      )
-    )
-
-  # get sample / batch metadata
-  sample_metadata <-
-    paste(parse_pipeline_dir,
-          "expdata",
-          experiment,
-          "sample_metadata.tsv",
-          sep = "/") %>%
-    readr::read_tsv(show_col_types = FALSE) %>%
-    janitor::clean_names() %>%
-    # add patient x sample type label
-    dplyr::mutate(
-      sample_type_code = dplyr::case_when(
-        sample_type == "renal_cyst" ~ "c",
-        sample_type == "solid" ~ "t",
-        sample_type == "normal_renal" ~ "n",
-        sample_type == "metastasis" ~ "met",
-        sample_type == "mixed" ~ "mix",
-        TRUE ~ sample_type
-      ),
-      sample_label = paste0(sample, "_", sample_type_code)
-    )
-  # sample_metadata$sample<-c("N090_V1027"  ,  "N090_V1024A" ,  "K1026_T2D_CL" ,"Mouse_nuclei")
-
-  # add to seu@meta.data
-  seu@meta.data <- seu@meta.data %>%
-    dplyr::left_join(sample_metadata,
-                     by = "sample")
-  rownames(seu@meta.data) <- colnames(seu)
-
-  # append numeric sample metadata to summary stats
-  summary_stats <- summary_stats %>%
+  # sample-level summary stats of interest
+  summary_stats <- get_summary_stats(data_dir) %>%
+    # append numeric sample metadata to summary stats
     dplyr::bind_rows(
-      sample_metadata %>%
+      seu@misc$sample_metadata %>%
         tidyr::pivot_longer(
           cols = tidyr::any_of(md_groupings) & where(is.numeric),
           names_to = "statistic"
-        ) %>%
-        dplyr::select(statistic, sample, value)
+        ) %>% dplyr::select(statistic, sample, value)
     )
-
-  # CELL AND GENE SUMMARY STATISTICS ----
-  # -> unusually high transcript/gene counts indicate multiplets
-  # -> unusually low transcript/gene counts indicate barcoding of cells with
-  #    damaged membranes (uninformative)
-  # -> high % mito genes indicates death / loss of cytoplasmic RNA / increased
-  #    apoptosis (for scRNA-seq, not snRNA-seq)
-  # -> high % globin and low % ribo suggests erythrocytes
 
   # plot summary stats
   cat("Plotting summary stats...\n")
@@ -137,102 +90,140 @@ generate_qc_report <- function(experiment,
     ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
     ggplot2::geom_col() +
     ggplot2::facet_grid(statistic ~ ., scales = "free") +
-    ggplot2::theme(
-      axis.text.x = ggplot2::element_text(angle = 90),
-      strip.text.y = ggplot2::element_text(angle = 0)
-    )
+    ggplot2::labs(title = "per-sample summary statistics")
+
+  # CELL AND GENE SUMMARY STATISTICS ----
+  # gene-level (min_cells_per_gene)
+  # -> genes that are present in very few cells of the dataset (<3) are uninformative
+  #    and unlikely to play any part in differentiating groups of cells (in general,
+  #    most genes removed by this filtering will be those not detected in any cell)
+  # cell-level (nCount_RNA, nFeature_RNA, percent_mito, multiplet_status)
+  # -> unusually high transcript/gene counts indicate multiplets
+  # -> unusually low transcript/gene counts indicate barcoding of cells with
+  #    damaged membranes (uninformative)
+  # -> high % of mito genes indicates death / loss of cytoplasmic RNA / increased
+  #    apoptosis (for scRNA-seq, not snRNA-seq)
+  # -> high % of globin and low % of ribo suggests erythrocytes
+  # -> high features:counts per cell ratio could be dying cells
+
+  # identify doublets (by creating artificial doublets and looking at their clustering)
+  cat("Annotating suspected doublets...\n")
+  seu <- annotate_doublets(seu)
+
+  # get proportions of relevant transcript types
+  cat("Annotating abundance of different transcript types...\n")
+  seu <- annotate_proportions_of_transcript_types(seu)
+
+  # get user-defined filters or designate filters
+  # -> nCount/Feature_RNA, percent_mito = median plus 5 x the median absolute deviation
+  #    (recommended by https://romanhaa.github.io/projects/scrnaseq_workflow)
+  # -> min_nFeature_RNA/min_cells_per_gene = defaults recommended by Parse
+  filters <- get_filters(seu,
+                         remove_doublets,
+                         max_nCount_RNA,
+                         min_nFeature_RNA,
+                         max_nFeature_RNA,
+                         max_percent_mito)
 
   # cells per sample
   cat("Plotting cells per sample...\n")
-  plots[["cells_per_sample_bar"]] <- dplyr::tibble(sample_id = names(table(seu$sample)),
-                                                   n_cells = table(seu$sample)) %>%
+  plots[["cells_per_sample_bar"]] <-
+    dplyr::tibble(sample_id = names(table(seu$sample)),
+                  n_cells = table(seu$sample)) %>%
     ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_cells)) +
     ggplot2::geom_col() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
-  # check distribution of genes per cell and cells per gene
-  cat("Plotting distribution of number of cells/genes...\n")
-  plots[["genes_per_cell_dist"]] <- seu@meta.data %>%
-    dplyr::as_tibble() %>%
-    dplyr::transmute(
-      nCount_RNA,
-      nFeature_RNA,
-      `bottom 95%` = 0.95,
-      all = 1,
-      `top 5%` = 0.95
-    ) %>%
-    tidyr::pivot_longer(c("nCount_RNA", "nFeature_RNA"),
-                        names_to = "statistic") %>%
-    tidyr::pivot_longer(c("bottom 95%", "all", "top 5%"),
-                        names_to = "label",
-                        values_to = "quantile") %>%
-    dplyr::group_by(label) %>%
-    dplyr::filter(
-      grepl("top", label) & value >= quantile(value, quantile) |
-        grepl("bottom", label) &
-        value <= quantile(value, quantile) |
-        label == "all"
-    ) %>%
-    dplyr::mutate(label = paste0(label, " (n = ", dplyr::n(), ")")) %>%
-    ggplot2::ggplot(ggplot2::aes(value)) +
-    ggplot2::geom_histogram(ggplot2::aes(y = ..density..),
-                            bins = 50,
-                            fill = "grey") +
-    ggplot2::geom_density() +
-    ggplot2::facet_wrap(statistic ~ label, scales = "free")
+  # create misc table of included/excluded cells, with exclude criteria
+  seu@misc$cell_filtering <-
+    seu@meta.data %>%
+    dplyr::as_tibble(rownames = "cell") %>%
+    dplyr::select(cell, sample, tidyr::any_of(names(filters))) %>%
+    tidyr::pivot_longer(-c(cell, sample)) %>%
+    dplyr::left_join(filters %>%
+                       purrr::map(dplyr::as_tibble) %>%
+                       dplyr::bind_rows(.id = "name")) %>%
+    dplyr::mutate(include = value >= min & value <= max,
+                  exclude_criteria = ifelse(include == F, name, NA)) %>%
+    dplyr::group_by(cell) %>%
+    dplyr::mutate(include_cell = all(include),
+                  exclude_criteria_cell = exclude_criteria %>% unique %>% na.omit %>%
+                    paste(collapse = ",") %>% dplyr::na_if(., "")
+    )
 
-  # identify doublets (by creating artificial doublets and looking at their clustering)
-  seu_dbl <- scDblFinder::scDblFinder(
-    Seurat::as.SingleCellExperiment(seu), samples = "sample"
-  )
-  seu$multiplet_class <- seu_dbl$scDblFinder.class
+  # plot filters on distributions
+  plots[["filters_vln"]] <-
+    seu@misc$cell_filtering %>%
+    dplyr::group_by(name) %>%
+    dplyr::mutate(name = paste0(name,
+                                "\nmin=", min, ", max=", max %>% {formatC(signif(., digits=5), digits=5, format="fg", flag="#")},
+                                "\nexcluded=", sum(!include), ", included=", sum(include))) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
+    ggplot2::geom_jitter(ggplot2::aes(colour = include),
+                         height = 0, alpha = 0.5, size = 0.6) +
+    ggplot2::geom_violin(ggplot2::aes(fill = sample), alpha = 0.8,
+                         draw_quantiles = 0.5) +
+    ggplot2::geom_hline(ggplot2::aes(yintercept = min), colour = "red") +
+    ggplot2::geom_hline(ggplot2::aes(yintercept = max), colour = "red") +
+    ggplot2::facet_wrap(~ name, scales = "free") +
+    ggplot2::theme(legend.position = "none",
+                   axis.text.x = element_text(angle = 90)) +
+    ditto_colours +
+    ggplot2::scale_colour_manual(values = c("red", "black"))
 
   # plot doublets
-  plots[["doublets_per_sample"]] <- seu@meta.data %>%
+  plots[["doublets_per_sample"]] <-
+    seu@misc$cell_filtering %>%
     dplyr::group_by(sample) %>%
-    dplyr::mutate(n_doublets = sum(multiplet_class == "doublet")) %>%
-    tidyr::pivot_longer(c("nFeature_RNA", "nCount_RNA", "n_doublets")) %>%
-    ggplot2::ggplot(ggplot2::aes(y = value, x = sample,
-                                 colour = multiplet_class)) +
-    ggplot2::geom_jitter(data = . %>% dplyr::filter(multiplet_class != "doublet"), height = 0) +
-    ggplot2::geom_jitter(data = . %>% dplyr::filter(multiplet_class == "doublet"), height = 0) +
-    ggplot2::theme_bw() +
+    dplyr::mutate(n_doublets = sum(name == "doublet" & value == 1)) %>%
+    dplyr::group_by(cell) %>%
+    dplyr::mutate(doublet = any(name == "doublet" & value == 1)) %>%
+    ggplot2::ggplot(ggplot2::aes(y = value, x = sample, colour = doublet)) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(!doublet), height = 0) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(doublet), height = 0) +
     ggplot2::labs(title = "detected doublets in each sample (using scDblFinder)") +
-    ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()) +
-    ggplot2::facet_wrap(~ name, scales = "free")
-
-  # get proportions of relevant transcript types
-  cat("Calculating abundance of different transcript types...\n")
-  purrr::pwalk(transcript_types, function(...) {
-    tt <- tibble::tibble(...)
-    cat("Calculating %", tt$name, "genes...\n")
-    cat(tt$message, "\n")
-    # use `<<` for global assignment
-    seu <<- seu %>%
-      Seurat::PercentageFeatureSet(pattern = tt$pattern,
-                                   col.name = paste0("percent_", tt$name))
-  })
+    ggplot2::facet_wrap(~ name, scales = "free") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
+    ditto_colours +
+    seu@misc$cell_filtering %>%
+    dplyr::group_by(sample) %>%
+    dplyr::mutate(n_singlets = sum(name == "doublet" & value == 0),
+                  n_doublets = sum(name == "doublet" & value == 1)) %>%
+    dplyr::distinct(sample, n_doublets, n_singlets) %>%
+    tidyr::pivot_longer(-sample) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample, y = value, fill = name)) +
+    ggplot2::geom_col() +
+    ggplot2::theme(axis.text.x = element_text(angle = 90)) +
+    ditto_colours
 
   # plot transcript type abundances
   cat("Plotting abundance of different transcript types...\n")
-  plots[["genes_per_cell_vln"]] <- Seurat::VlnPlot(seu,
-                                                   c("tscp_count", "gene_count"),
-                                                   group.by = "sample",
-                                                   raster = F)
-  plots[["transcript_types_per_cell_vln"]] <- Seurat::VlnPlot(
-    seu,
-    c("percent_mito", "percent_ribo", "percent_globin"),
-    group.by = "sample",
-    pt.size = 0.1,
-    ncol = 3,
-    raster = F
-  )
-  plots[["rna_molecules_vs_rna_transcripts_scatter"]] <-
-    dittoSeq::dittoScatterPlot(seu, "nCount_RNA", "nFeature_RNA", "sample", raster = F)
-  plots[["rna_molecules_vs_pct_mito_scatter"]] <-
-    dittoSeq::dittoScatterPlot(seu, "nCount_RNA", "percent_mito", "sample", raster = F)
-  plots[["pct_globin_vs_ribo_scatter"]] <-
-    dittoSeq::dittoScatterPlot(seu, "percent_globin", "percent_ribo", "sample", raster = F)
+  plots[["filters_scatter"]] <-
+    plot_cell_scatter_with_filters(seu, "nCount_RNA", "percent_mito", filters) +
+    plot_cell_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", filters)
+
+  # filtering
+  if(do_filtering == T) {
+
+    # perform cell filtering
+    cat("Filtering cells...")
+    seu <- seu[, colnames(seu)[colnames(seu) %in%
+        unique(dplyr::filter(seu@misc$cell_filtering, include_cell)$cell)]
+      ]
+
+    # perform gene filtering
+    cat("Filtering genes...")
+    seu@misc$gene_filtering <- tibble::tibble(
+      gene = rownames(seu),
+      n_transcripts = rowSums(seu[["RNA"]]),
+      n_cells = rowSums(as.matrix(seu@assays$RNA@counts) != 0)
+    ) %>%
+      dplyr::mutate(min = min_cells_per_gene,
+                    include_gene = n_cells >= min)
+    seu <- seu[, rownames(seu)[rownames(seu) %in%
+        unique(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene)]]
+
+  }
 
   # highest expressed genes
   # cat("Plotting top 20 most highly expressed genes...\n")
@@ -429,7 +420,6 @@ generate_qc_report <- function(experiment,
 
   # cluster tree plot of increasing resolutions
   cat("Plotting clustering tree at different resolutions...\n")
-  library(clustree)
   snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
   plots[["clustering_tree"]] <- clustree::clustree(
     seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
@@ -594,7 +584,8 @@ generate_qc_report <- function(experiment,
       )
 
     # alluvial plots
-    plots[["alluvial_sample_cluster_singler"]] <- seu@meta.data %>%
+    plots[["alluvial_sample_cluster_singler"]] <-
+      seu@meta.data %>%
       dplyr::group_by(sample, cluster, singler_annot) %>%
       dplyr::count() %>%
       dplyr::ungroup() %>%
@@ -620,10 +611,10 @@ generate_qc_report <- function(experiment,
                                            rep(0, dplyr::n_distinct(seu$cluster)),
                                            rep(0.3, dplyr::n_distinct(seu$singler_annot))
                                          )) +
-      ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()) +
       ggplot2::theme_void() +
       ggplot2::theme(legend.position = "none",
-                     axis.text.x = element_text(face = "bold", size = 15))
+                     axis.text.x = element_text(face = "bold", size = 15)) +
+      ditto_colours
 
     # save annotated seu
     saveRDS(seu, file = paste0(out$base, "/seu_annotated.rds"))

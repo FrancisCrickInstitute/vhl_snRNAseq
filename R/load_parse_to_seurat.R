@@ -1,8 +1,12 @@
 load_parse_to_seurat <-
   function(dge_dir,
-           min_genes_per_cell,
+           min_nFeature_RNA,
            min_cells_per_gene,
-           sample_subset) {
+           sample_subset,
+           remove_na_samples = F,
+           do_add_sample_metadata = F,
+           parse_pipeline_dir = NULL,
+           experiment = NULL) {
 
     # read in DGE matrix
     dge_mat <- Seurat::ReadParseBio(dge_dir)
@@ -27,6 +31,16 @@ load_parse_to_seurat <-
     # subset to sample subset
     if(!is.null(sample_subset)) {
       seu <- subset(x = seu, subset = sample %in% sample_subset)
+    }
+
+    # remove NA samples
+    if(remove_na_samples == T) {
+      seu <- subset(seu, subset = sample %in% seu$sample[!is.na(seu$sample)])
+    }
+
+    # add sample metadata
+    if(do_add_sample_metadata == T) {
+      seu <- add_sample_metadata(seu, parse_pipeline_dir, experiment)
     }
 
     return(seu)

@@ -4,8 +4,9 @@ define_out <- function(
     sublibrary,
     parse_analysis_subdir,
     out_dir,
-    do_timestamp,
-    do_integration
+    do_filtering,
+    do_integration,
+    do_timestamp
 ) {
   out <- list(
     base = "",
@@ -20,6 +21,7 @@ define_out <- function(
   if (is.null(out_dir)) {
     out <- "out/" %>%
       paste(experiment, genome, sublibrary, parse_analysis_subdir, sep = "/") %>%
+      { if(do_filtering) paste0(., "/filtered/") else . } %>%
       { if(do_integration) paste0(., "/integrated/") else . } %>%
       { if(do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . } %>%
       { purrr::map(out, function(x) paste0(., x)) }
