@@ -5,10 +5,12 @@ load_parse_to_seurat <-
            sublibrary,
            parse_analysis_subdir,
            min_nFeature_RNA,
-           min_cells_per_gene,
+           min_nuclei_per_gene,
            sample_subset,
            remove_na_samples = F,
-           do_add_sample_metadata = F) {
+           do_add_sample_metadata = F,
+           do_add_summary_stats = T,
+           groupings) {
 
     # read in DGE matrix
     sublib_dir <- paste(parse_dir, "/analysis/", experiment, genome, sublibrary, sep = "/")
@@ -26,8 +28,8 @@ load_parse_to_seurat <-
       Seurat::CreateSeuratObject(
         names.field = 0,
         meta.data = cell_metadata,
-        min_genes = min_genes_per_cell,
-        min_cells = min_cells_per_gene
+        min_genes = min_genes_per_nucleus,
+        min_cells = min_nuclei_per_gene
       )
 
     # subset to sample subset
@@ -48,11 +50,42 @@ load_parse_to_seurat <-
         readr::read_tsv(show_col_types = F)
 
       # add to Seurat object meta.data
-      seu@meta.data <- seu@meta.data %>% dplyr::left_join(sample_metadata, by = "sample")
+      seu@meta.data <-
+        dplyr::left_join(seu@meta.data,
+                         sample_metadata %>% dplyr::select(dplyr::any_of(groupings)),
+                         by = "sample")
       rownames(seu@meta.data) <- colnames(seu)
 
       # add sample-level table to misc slot
       seu@misc$sample_metadata <- sample_metadata
+
+    }
+
+    # add summary statistics
+    if(do_add_summary_stats == T) {
+
+      # get summary stats from parse analysis
+      seu@misc$summary_stats <-
+        paste(parse_dir, "/analysis/", experiment, genome, sublibrary, "/agg_samp_ana_summary.csv", sep = "/") %>%
+        readr::read_csv(show_col_types = FALSE) %>%
+        tidyr::pivot_longer(cols = -statistic, names_to = "sample") %>%
+        dplyr::mutate(statistic = statistic %>% gsub(paste0(genome, "\\_"), "", .)) %>%
+        dplyr::filter(
+          statistic %in% c(
+            "median_tscp_per_cell",
+            "median_genes_per_cell",
+            "tso_fraction_in_read1",
+            "fraction_tscp_in_cells"
+          )
+        )  %>%
+        # append numeric sample metadata to summary stats
+        dplyr::bind_rows(
+          seu@misc$sample_metadata %>%
+            tidyr::pivot_longer(
+              cols = tidyr::any_of(groupings) & where(is.numeric),
+              names_to = "statistic"
+            ) %>% dplyr::select(statistic, sample, value)
+        )
 
     }
 

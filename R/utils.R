@@ -33,24 +33,6 @@ get_centroids <- function(seu, reduction, ...) {
 # Get filters (anything below the median plus 5 x the median absolute deviation)
 get_max <- function(x, n_mads = 5) { median(x) + n_mads * mad(x) }
 
-# Get summary stats from the parse-pipeline output directory
-get_summary_stats <- function(
-    data_dir,
-    statistics = c(
-      "median_tscp_per_cell",
-      "median_genes_per_cell",
-      "tso_fraction_in_read1",
-      "fraction_tscp_in_cells"
-    )) {
-  readr::read_csv(paste0(data_dir, "/agg_samp_ana_summary.csv"),
-                  show_col_types = FALSE) %>%
-    tidyr::pivot_longer(cols = -statistic, names_to = "sample") %>%
-    dplyr::mutate(statistic = statistic %>% gsub(paste0(genome, "\\_"), "", .)) %>%
-    dplyr::filter(
-      statistic %in% statistics
-    )
-}
-
 # Annotate proportions of relevant transcript types
 annotate_proportions_of_transcript_types <- function(seu) {
   purrr::pwalk(transcript_types, function(...) {
@@ -76,7 +58,7 @@ annotate_doublets <- function(seu) {
 }
 
 # Check distribution of genes per cell
-plot_genes_per_cell_dist <- function(seu) {
+plot_genes_per_nucleus_dist <- function(seu) {
   seu@meta.data %>%
     dplyr::as_tibble() %>%
     dplyr::transmute(
@@ -107,10 +89,10 @@ plot_genes_per_cell_dist <- function(seu) {
     ggplot2::facet_wrap(statistic ~ label, scales = "free")
 }
 
-# Plot cell scatter with filters
-plot_cell_scatter_with_filters <- function(seu, x, y, filters, ...) {
+# Plot nucleus scatter with filters
+plot_nucleus_scatter_with_filters <- function(seu, x, y, filters, ...) {
   dat <- seu@meta.data %>%
-    tibble::as_tibble(rownames = "cell") %>%
+    tibble::as_tibble(rownames = "nucleus") %>%
     dplyr::mutate(x_var = get(x), y_var = get(y),
                   include = x_var >= filters[[x]]$min & x_var <= filters[[x]]$max &
                     y_var >= filters[[y]]$min & y_var <= filters[[y]]$max,
@@ -173,7 +155,7 @@ boxplot_top_genes <- function(seu, n_genes = 20) {
     Seurat::GetAssayData(assay = "RNA", slot = "counts") %>%
     as.matrix()
 
-  # get percentage/cell
+  # get percentage/nucleus
   cts <- t(cts) / colSums(cts) * 100
   medians <- apply(cts, 2, median)
 

@@ -7,7 +7,7 @@
 #' @param parse_analysis_subdir Parse Biosciences split-pipe DGE subdirectory. This directory must contain `DGE.mtx`, `all_genes.csv`, and `cell_metadata.csv` files. This will indicate which wells to include and whether to use the `DGE_filtered/` or `DGE_unfiltered/` matrix. Default is "all-well/DGE_filtered/".
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
-#' @param min_cells_per_gene \emph{Gene filter}. The minimum number of nuclei in which a gene must be present. Genes that are present in very few nuclei are uninformative and unlikely to help in differentiating groups of cells. In general, most genes removed by this filtering will be those not detected in any nucleus.
+#' @param min_nuclei_per_gene \emph{Gene filter}. The minimum number of nuclei in which a gene must be present. Genes that are present in very few nuclei are uninformative and unlikely to help in differentiating groups of nuclei. In general, most genes removed by this filtering will be those not detected in any nucleus.
 #' @param max_nCount_RNA \emph{Nucleus filter}. The maximum number of transcripts detected per nucleus. An unusually high number of RNA molecules suggests that the nucleus is a multiplet.
 #' @param max_nFeature_RNA \emph{Nucleus filter}. The maximum number of genes detected per nucleus. An unusually high number of genes suggests that the nucleus is a multiplet.
 #' @param min_nFeature_RNA \emph{Nucleus filter}. The minimum number of genes detected per nucleus. An unusually low number of genes suggests that the nucleus has a damaged membrane and is therefore low quality.
@@ -31,7 +31,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
                              sample_metadata_file,
                              do_filtering = T,
                              remove_doublets = T,
-                             min_cells_per_gene = 5,
+                             min_nuclei_per_gene = 5,
                              max_nCount_RNA = NULL,
                              min_nFeature_RNA = NULL,
                              max_nFeature_RNA = NULL,
@@ -49,7 +49,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   args <- as.list(environment())
 
   # for test runs
-  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_unfiltered/";do_filtering=T;remove_doublets=T;min_cells_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
+  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_unfiltered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101"
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY"
   # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5"
@@ -84,10 +84,17 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   # save captured arguments
   if("args" %in% ls()) { dput(args, paste0(out$base, "/args_for_generate_qc_report.R")) }
 
+  # sample groupings to check at clustering stage
+  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "doublet",
+                 "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size") %>%
+    # if genome is human, do cell cycle scoring (doesn't work with other genomes)
+    { if (grepl("hg38", genome)) c(., "Phase") else . }
+
   # LOAD DATA ----
 
   # load parse pipeline output to seurat object with no cut-offs, remove sample
-  # NAs, add sample_metadata, optionally subset samples
+  # NAs, add sample_metadata, add summary_stats, optionally subset samples
+  cat("Creating Seurat object...\n")
   seu <- load_parse_to_seurat(
     parse_dir,
     experiment,
@@ -95,48 +102,33 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     sublibrary,
     parse_analysis_subdir,
     min_nFeature_RNA = 0,
-    min_cells_per_gene = 0,
+    min_nuclei_per_gene = 0,
     sample_subset,
     remove_na_samples = T,
-    do_add_sample_metadata = T
+    do_add_sample_metadata = T,
+    do_add_summary_stats = T,
+    groupings
   )
+
   # save seu object
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 
-  # sample groupings to check at clustering stage
-  md_groupings <- c("date_prep", "patient_id", "rin", "sample_type", "size")
-  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "doublet",
-                 md_groupings) %>%
-    # if genome is human, do cell cycle scoring (doesn't work with other genomes)
-    { if (grepl("hg38", genome)) c(., "Phase") else . }
-
-  # sample-level summary stats of interest
-  summary_stats <- get_summary_stats(data_dir) %>%
-    # append numeric sample metadata to summary stats
-    dplyr::bind_rows(
-      seu@misc$sample_metadata %>%
-        tidyr::pivot_longer(
-          cols = tidyr::any_of(md_groupings) & where(is.numeric),
-          names_to = "statistic"
-        ) %>% dplyr::select(statistic, sample, value)
-    )
-
   # plot summary stats
   cat("Plotting summary stats...\n")
-  plots[["run_summary_stats"]] <- summary_stats %>%
+  plots[["run_summary_stats"]] <- seu@misc$summary_stats %>%
     ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
     ggplot2::geom_col() +
     ggplot2::facet_grid(statistic ~ ., scales = "free") +
     ggplot2::labs(title = "per-sample summary statistics")
 
-  # CELL AND GENE SUMMARY STATISTICS ----
-  # gene-level (min_cells_per_gene)
-  # -> genes that are present in very few cells of the dataset (<3) are uninformative
-  #    and unlikely to play any part in differentiating groups of cells (in general,
-  #    most genes removed by this filtering will be those not detected in any cell)
-  # cell-level (nCount_RNA, nFeature_RNA, percent_mito, doublet)
+  # CELL AND GENE FILTERING ----
+  # gene-level (min_nuclei_per_gene)
+  # -> genes that are present in very few nuclei of the dataset (<3) are uninformative
+  #    and unlikely to play any part in differentiating groups of nuclei (in general,
+  #    most genes removed by this filtering will be those not detected in any nuclei)
+  # nucleus-level (nCount_RNA, nFeature_RNA, percent_mito, doublet)
   # -> unusually high transcript/gene counts indicate multiplets
-  # -> unusually low transcript/gene counts indicate barcoding of cells with
+  # -> unusually low transcript/gene counts indicate barcoding of nuclei with
   #    damaged membranes (uninformative)
   # -> high % of mito genes indicates death / loss of cytoplasmic RNA / increased
   #    apoptosis (for scRNA-seq, not snRNA-seq)
@@ -154,7 +146,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   # get user-defined filters or designate filters
   # -> nCount/Feature_RNA, percent_mito = median plus 5 x the median absolute deviation
   #    (recommended by https://romanhaa.github.io/projects/scrnaseq_workflow)
-  # -> min_nFeature_RNA/min_cells_per_gene = defaults recommended by Parse
+  # -> min_nFeature_RNA/min_nuclei_per_gene = defaults recommended by Parse
   filters <- get_filters(seu,
                          do_filtering,
                          remove_doublets,
@@ -163,8 +155,8 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
                          max_nFeature_RNA,
                          max_percent_mito)
 
-  # create misc table of included/excluded cells, with exclude criteria
-  seu@misc$cell_filtering <-
+  # create misc table of included/excluded nuclei, with exclude criteria
+  seu@misc$nucleus_filtering <-
     seu@meta.data %>%
     dplyr::as_tibble(rownames = "nucleus") %>%
     dplyr::select(nucleus, sample, tidyr::any_of(names(filters))) %>%
@@ -172,35 +164,37 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     dplyr::left_join(filters %>%
                        purrr::map(dplyr::as_tibble) %>%
                        dplyr::bind_rows(.id = "name")) %>%
-    dplyr::mutate(include = value >= min & value <= max,
+    dplyr::mutate(n_nuclei = dplyr::n_distinct(nucleus),
+                  include = value >= min & value <= max,
                   exclude_criteria = ifelse(include == F, name, NA)) %>%
     dplyr::group_by(nucleus) %>%
-    dplyr::mutate(include_cell = all(include),
-                  exclude_criteria_cell = exclude_criteria %>% unique %>% na.omit %>%
+    dplyr::mutate(include_nucleus = all(include),
+                  exclude_criteria_nucleus = exclude_criteria %>% unique %>% na.omit %>%
                     paste(collapse = ",") %>% dplyr::na_if(., "")
     )
 
   # create misc table of included/excluded genes
   seu@misc$gene_filtering <- tibble::tibble(
     gene = rownames(seu),
+    n_genes = dplyr::n_distinct(gene),
     n_transcripts = Matrix::rowSums(seu),
-    n_cells = rowSums(as.matrix(seu@assays$RNA@counts) > 0)
+    n_nuclei = rowSums(as.matrix(seu@assays$RNA@counts) > 0)
   ) %>%
-    dplyr::mutate(min = min_cells_per_gene,
-                  include_gene = n_cells >= min)
+    dplyr::mutate(min = min_nuclei_per_gene,
+                  include_gene = n_nuclei >= min)
 
-  # cells per sample
-  cat("Plotting cells per sample...\n")
-  plots[["cells_per_sample_bar"]] <-
+  # nuclei per sample
+  cat("Plotting nuclei per sample...\n")
+  plots[["nuclei_per_sample_bar"]] <-
     dplyr::tibble(sample_id = names(table(seu$sample)),
-                  n_cells = table(seu$sample)) %>%
-    ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_cells)) +
+                  n_nuclei = table(seu$sample)) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_nuclei)) +
     ggplot2::geom_col() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
   # plot filters on distributions
   plots[["filters_vln"]] <-
-    seu@misc$cell_filtering %>%
+    seu@misc$nucleus_filtering %>%
     dplyr::group_by(name) %>%
     dplyr::mutate(name = paste0(name,
                                 "\nmin=", min, ", max=", max %>% {formatC(signif(., digits=5), digits=5, format="fg", flag="#")},
@@ -220,7 +214,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # plot doublets
   plots[["doublets_per_sample"]] <-
-    seu@misc$cell_filtering %>%
+    seu@misc$nucleus_filtering %>%
     dplyr::group_by(sample) %>%
     dplyr::mutate(n_doublets = sum(name == "doublet" & value == 1)) %>%
     dplyr::group_by(nucleus) %>%
@@ -232,7 +226,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     ggplot2::facet_wrap(~ name, scales = "free") +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
     ditto_colours +
-    seu@misc$cell_filtering %>%
+    seu@misc$nucleus_filtering %>%
     dplyr::group_by(sample) %>%
     dplyr::mutate(n_singlets = sum(name == "doublet" & value == 0),
                   n_doublets = sum(name == "doublet" & value == 1)) %>%
@@ -246,15 +240,16 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   # plot transcript type abundances
   cat("Plotting abundance of different transcript types...\n")
   plots[["filters_scatter"]] <-
-    plot_cell_scatter_with_filters(seu, "nCount_RNA", "percent_mito", filters) +
-    plot_cell_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", filters)
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", filters) +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", filters)
 
   # filtering
   if(do_filtering == T) {
 
     # perform nucleus filtering
-    cat("Filtering cells...\n")
-    seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$cell_filtering, include_cell)$nucleus))
+    cat("Filtering nuclei...\n")
+    cat()
+    seu <- subset(seu, nuclei = unique(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus))
 
     # perform gene filtering
     cat("Filtering genes...\n")
@@ -450,10 +445,10 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   cat("Clustering data at different resolutions...\n")
 
   # compute k.param nearest neighbours based on euclidean distance in PCA space
-  # and check shared nearest neighbours between any 2 cells (Jaccard similarity)
+  # and check shared nearest neighbours between any 2 nuclei (Jaccard similarity)
   seu <- Seurat::FindNeighbors(seu, dims = 1:final_n_dims)
 
-  # identify clusters of cells by a shared nearest neighbours modularity
+  # identify clusters of nuclei by a shared nearest neighbours modularity
   # optimisation based clustering algorithm
   seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions)
   saveRDS(seu, file = paste0(out$base, "/seu_transformed_and_clustered.rds"))
