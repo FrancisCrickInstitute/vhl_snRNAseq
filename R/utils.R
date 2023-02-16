@@ -119,8 +119,10 @@ get_filters <- function(seu,
                         min_nFeature_RNA,
                         max_nFeature_RNA,
                         max_percent_mito) {
+
+  # get filters
   if(do_filtering == T) {
-    list(
+    filters <- list(
       "doublet" = list(
         min = 0,
         max = ifelse(remove_doublets == T, 0, 1)
@@ -139,13 +141,44 @@ get_filters <- function(seu,
       )
     )
   } else {
-    list(
+    filters <- list(
       "doublet" = list(min = -Inf, max = Inf),
       "nCount_RNA" = list(min = -Inf, max = Inf),
       "nFeature_RNA" = list(min = -Inf, max = Inf),
       "percent_mito" = list(min = -Inf, max = Inf)
     )
   }
+
+  # add to seu
+  seu@misc$filters <- filters
+
+  # create misc table of included/excluded nuclei, with exclude criteria
+  seu@misc$nucleus_filtering <-
+    seu@meta.data %>%
+    dplyr::as_tibble(rownames = "nucleus") %>%
+    dplyr::select(nucleus, sample, tidyr::any_of(names(filters))) %>%
+    tidyr::pivot_longer(-c(nucleus, sample)) %>%
+    dplyr::left_join(filters %>%
+                       purrr::map(dplyr::as_tibble) %>%
+                       dplyr::bind_rows(.id = "name")) %>%
+    dplyr::mutate(n_nuclei = dplyr::n_distinct(nucleus),
+                  include = value >= min & value <= max,
+                  exclude_criteria = ifelse(include == F, name, NA)) %>%
+    dplyr::group_by(nucleus) %>%
+    dplyr::mutate(include_nucleus = all(include),
+                  exclude_criteria_nucleus = exclude_criteria %>% unique %>% na.omit %>%
+                    paste(collapse = ",") %>% dplyr::na_if(., "")
+    )
+
+  # create misc table of included/excluded genes
+  seu@misc$gene_filtering <- tibble::tibble(
+    gene = rownames(seu),
+    n_genes = dplyr::n_distinct(gene),
+    n_transcripts = Matrix::rowSums(seu),
+    n_nuclei = rowSums(as.matrix(seu@assays$RNA@counts) > 0)
+  ) %>%
+    dplyr::mutate(min = min_nuclei_per_gene,
+                  include_gene = n_nuclei >= min)
 }
 
 # Generate a boxplot of the top n genes

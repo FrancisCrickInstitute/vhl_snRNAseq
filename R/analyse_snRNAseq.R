@@ -147,41 +147,15 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   # -> nCount/Feature_RNA, percent_mito = median plus 5 x the median absolute deviation
   #    (recommended by https://romanhaa.github.io/projects/scrnaseq_workflow)
   # -> min_nFeature_RNA/min_nuclei_per_gene = defaults recommended by Parse
-  filters <- get_filters(seu,
-                         do_filtering,
-                         remove_doublets,
-                         max_nCount_RNA,
-                         min_nFeature_RNA,
-                         max_nFeature_RNA,
-                         max_percent_mito)
-
-  # create misc table of included/excluded nuclei, with exclude criteria
-  seu@misc$nucleus_filtering <-
-    seu@meta.data %>%
-    dplyr::as_tibble(rownames = "nucleus") %>%
-    dplyr::select(nucleus, sample, tidyr::any_of(names(filters))) %>%
-    tidyr::pivot_longer(-c(nucleus, sample)) %>%
-    dplyr::left_join(filters %>%
-                       purrr::map(dplyr::as_tibble) %>%
-                       dplyr::bind_rows(.id = "name")) %>%
-    dplyr::mutate(n_nuclei = dplyr::n_distinct(nucleus),
-                  include = value >= min & value <= max,
-                  exclude_criteria = ifelse(include == F, name, NA)) %>%
-    dplyr::group_by(nucleus) %>%
-    dplyr::mutate(include_nucleus = all(include),
-                  exclude_criteria_nucleus = exclude_criteria %>% unique %>% na.omit %>%
-                    paste(collapse = ",") %>% dplyr::na_if(., "")
-    )
-
-  # create misc table of included/excluded genes
-  seu@misc$gene_filtering <- tibble::tibble(
-    gene = rownames(seu),
-    n_genes = dplyr::n_distinct(gene),
-    n_transcripts = Matrix::rowSums(seu),
-    n_nuclei = rowSums(as.matrix(seu@assays$RNA@counts) > 0)
-  ) %>%
-    dplyr::mutate(min = min_nuclei_per_gene,
-                  include_gene = n_nuclei >= min)
+  seu <- get_filters(
+    seu,
+    do_filtering,
+    remove_doublets,
+    max_nCount_RNA,
+    min_nFeature_RNA,
+    max_nFeature_RNA,
+    max_percent_mito
+  )
 
   # nuclei per sample
   cat("Plotting nuclei per sample...\n")
@@ -248,11 +222,13 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
     # perform nucleus filtering
     cat("Filtering nuclei...\n")
-    cat()
+    cat(dplyr::n_distinct(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus), "/", nrow(seu), "nuclei retained\n")
     seu <- subset(seu, nuclei = unique(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus))
 
     # perform gene filtering
     cat("Filtering genes...\n")
+    cat(dplyr::n_distinct(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene), "/", ncol(seu), "genes retained"
+
     seu <- subset(seu, features = unique(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene))
 
   }
