@@ -16,7 +16,8 @@ generate_qc_report(
   genome = genome,
   sublibrary = sublibrary,
   parse_analysis_subdir = parse_analysis_subdir,
-  out_dir = NULL,
-  sample_subset = NULL,
-  do_timestamp = F,
+  do_filtering = T,
+  remove_doublets = T,
+  min_cells_per_gene = 5,
+  final_clustering_resolution = 0.3,
   do_integration = do_integration)

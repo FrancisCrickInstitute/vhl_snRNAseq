@@ -2,17 +2,19 @@
 % Please edit documentation in R/analyse_parse.R
 \name{analyse_parse}
 \alias{analyse_parse}
-\title{Add together two numbers}
+\title{Implement pipeline to QC and analyse Parse snRNAseq data}
 \usage{
 analyse_parse(
   experiment,
   parse_pipeline_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
   genome = "hg38",
-  parse_analysis_subdir = "/all-well/DGE_filtered/",
+  sublibrary = "comb",
+  parse_analysis_subdir = "/all-well/DGE_unfiltered/",
   out_dir = NULL,
   sample_subset = NULL,
   min_genes = 3,
   min_cells = 100,
+  max_percent_mito = 5,
   do_timestamp = F
 )
 }
@@ -21,7 +23,7 @@ analyse_parse(
 
 \item{parse_pipeline_dir}{The full path to the directory where the Parse split-pipe pipeline was run. This should contain genomes/, expdata/, and analysis/ directories.}
 
-\item{genome}{The name of the genome build used as a reference. This will also be the immediate subdirectory of the experiment's analysis.}
+\item{genome}{The name of the genome build used as a reference. This will also be the immediate subdirectory of the experiment's analysis. Default is human genome build 38 ("hg38").}
 
 \item{parse_analysis_subdir}{The Parse output directory to be used.}
 
@@ -33,5 +35,5 @@ analyse_parse(
 A Seurat object
 }
 \description{
-Add together two numbers
+Implement pipeline to QC and analyse Parse snRNAseq data
 }

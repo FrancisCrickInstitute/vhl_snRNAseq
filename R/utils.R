@@ -106,7 +106,7 @@ annotate_doublets <- function(seu) {
   seu_dbl <- scDblFinder::scDblFinder(
     Seurat::as.SingleCellExperiment(seu), samples = "sample"
   )
-  seu$doublet <- as.numeric(seu$multiplet_class == "doublet")
+  seu$doublet <- as.numeric(seu_dbl$scDblFinder.class == "doublet")
   return(seu)
 }
 
@@ -166,6 +166,7 @@ plot_cell_scatter_with_filters <- function(seu, x, y, filters, ...) {
 
 # Get filters list object
 get_filters <- function(seu,
+                        do_filtering,
                         remove_doublets,
                         max_nCount_RNA,
                         min_nFeature_RNA,

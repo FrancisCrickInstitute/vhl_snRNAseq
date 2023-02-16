@@ -6,7 +6,7 @@ generate_qc_report <- function(experiment,
                                parse_analysis_subdir = "/all-well/DGE_unfiltered/",
                                do_filtering = T,
                                remove_doublets = T,
-                               min_cells_per_gene = 3,
+                               min_cells_per_gene = 5,
                                max_nCount_RNA = NULL,
                                min_nFeature_RNA = NULL,
                                max_nFeature_RNA = NULL,
@@ -25,7 +25,8 @@ generate_qc_report <- function(experiment,
   # test runs
   # testing: setwd # setwd(paste0(ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/working/VHL_GERMLINE/tidda/","/camp/project/tracerX/working/VHL_GERMLINE/tidda/"),"vhl/"));
   # testing: pilot # library(devtools);load_all();experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";parse_pipeline_dir = paste0(get_base_dir(), "/parse_pipeline/");do_filtering=T;remove_doublets = T;min_cells_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
-  # testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";do_integration=F
+  # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="comb"
+  # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5";genome="hg38";sublibrary="comb"
   # testing: args  # library(devtools);load_all();args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv()); parse_pipeline_dir=paste0(get_base_dir(), "/parse_pipeline/")
   # testing: archived # data_dir="/Volumes/TracerX/working/VHL_GERMLINE/tidda//parse_pipeline/archive/230209////analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101";dge_dir="/Volumes/TracerX/working/VHL_GERMLINE/tidda//parse_pipeline/archive/230209////analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered";sample_metadata$sample<-c("N090_V1027"  ,  "N090_V1024A" ,  "K1026_T2D_CL" ,"Mouse_nuclei")
 
@@ -61,14 +62,13 @@ generate_qc_report <- function(experiment,
     do_add_sample_metadata = T,
     parse_pipeline_dir,
     experiment
-  ) # temporary sample names patch: # seu@misc$sample_metadata$sample<-seu@misc$sample_metadata$sample %>% gsub("V12", "V102", .);seu$sample<-seu$sample%>% gsub("V12", "V102", .)
-
+  )
   # save seu object
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 
   # sample groupings to check at clustering stage
   md_groupings <- c("date_prep", "patient_id", "rin", "sample_type", "size")
-  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "multiplet_class",
+  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "doublet",
                  md_groupings) %>%
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
     { if (grepl("hg38", genome)) c(., "Phase") else . }
@@ -97,7 +97,7 @@ generate_qc_report <- function(experiment,
   # -> genes that are present in very few cells of the dataset (<3) are uninformative
   #    and unlikely to play any part in differentiating groups of cells (in general,
   #    most genes removed by this filtering will be those not detected in any cell)
-  # cell-level (nCount_RNA, nFeature_RNA, percent_mito, multiplet_status)
+  # cell-level (nCount_RNA, nFeature_RNA, percent_mito, doublet)
   # -> unusually high transcript/gene counts indicate multiplets
   # -> unusually low transcript/gene counts indicate barcoding of cells with
   #    damaged membranes (uninformative)
@@ -119,20 +119,12 @@ generate_qc_report <- function(experiment,
   #    (recommended by https://romanhaa.github.io/projects/scrnaseq_workflow)
   # -> min_nFeature_RNA/min_cells_per_gene = defaults recommended by Parse
   filters <- get_filters(seu,
+                         do_filtering,
                          remove_doublets,
                          max_nCount_RNA,
                          min_nFeature_RNA,
                          max_nFeature_RNA,
                          max_percent_mito)
-
-  # cells per sample
-  cat("Plotting cells per sample...\n")
-  plots[["cells_per_sample_bar"]] <-
-    dplyr::tibble(sample_id = names(table(seu$sample)),
-                  n_cells = table(seu$sample)) %>%
-    ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_cells)) +
-    ggplot2::geom_col() +
-    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
   # create misc table of included/excluded cells, with exclude criteria
   seu@misc$cell_filtering <-
@@ -150,6 +142,24 @@ generate_qc_report <- function(experiment,
                   exclude_criteria_cell = exclude_criteria %>% unique %>% na.omit %>%
                     paste(collapse = ",") %>% dplyr::na_if(., "")
     )
+
+  # create misc table of included/excluded genes
+  seu@misc$gene_filtering <- tibble::tibble(
+    gene = rownames(seu),
+    n_transcripts = Matrix::rowSums(seu),
+    n_cells = rowSums(as.matrix(seu@assays$RNA@counts) > 0)
+  ) %>%
+    dplyr::mutate(min = min_cells_per_gene,
+                  include_gene = n_cells >= min)
+
+  # cells per sample
+  cat("Plotting cells per sample...\n")
+  plots[["cells_per_sample_bar"]] <-
+    dplyr::tibble(sample_id = names(table(seu$sample)),
+                  n_cells = table(seu$sample)) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_cells)) +
+    ggplot2::geom_col() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
   # plot filters on distributions
   plots[["filters_vln"]] <-
@@ -206,22 +216,12 @@ generate_qc_report <- function(experiment,
   if(do_filtering == T) {
 
     # perform cell filtering
-    cat("Filtering cells...")
-    seu <- seu[, colnames(seu)[colnames(seu) %in%
-        unique(dplyr::filter(seu@misc$cell_filtering, include_cell)$cell)]
-      ]
+    cat("Filtering cells...\n")
+    seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$cell_filtering, include_cell)$cell))
 
     # perform gene filtering
-    cat("Filtering genes...")
-    seu@misc$gene_filtering <- tibble::tibble(
-      gene = rownames(seu),
-      n_transcripts = rowSums(seu[["RNA"]]),
-      n_cells = rowSums(as.matrix(seu@assays$RNA@counts) != 0)
-    ) %>%
-      dplyr::mutate(min = min_cells_per_gene,
-                    include_gene = n_cells >= min)
-    seu <- seu[, rownames(seu)[rownames(seu) %in%
-        unique(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene)]]
+    cat("Filtering genes...\n")
+    seu <- subset(seu, features = unique(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene))
 
   }
 
@@ -231,8 +231,11 @@ generate_qc_report <- function(experiment,
   # TODO: fix this - it kills the job, too memory intensive
 
   # highest variable genes (HVGs)
-  cat("Plotting most highly variable genes (HVGs)...\n")
+  cat("Finding most highly variable genes (HVGs)...\n")
   seu <- Seurat::FindVariableFeatures(seu)
+
+  # plot hvgs
+  cat("Plotting HVGs...\n")
   plots[["hvg_scatter"]] <- Seurat::LabelPoints(
     plot = Seurat::VariableFeaturePlot(seu, raster = F),
     points = head(Seurat::VariableFeatures(seu), 10),
@@ -646,8 +649,14 @@ generate_qc_report <- function(experiment,
   plots_grob <- marrangeGrob(grobs = plots, nrow = 1, ncol = 1)
   ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
          width = 20, height = 20, units = "cm")
+  ggsave(paste0(out$base, "/groupings_vs_reductions.pdf"), groupings_vs_reductions_grob,
+  width = 20, height = 60, units = "cm")
+  ggsave(paste0(out$base, "/clustered_reductions.pdf"), clustered_reductions_grob,
+         width = 20, height = 60, units = "cm")
   if (length(dev.list()) != 0) { dev.off() }
   saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
+  saveRDS(groupings_vs_reductions_grob, file = paste0(out$base, "/groupings_vs_reductions_grob.rds"))
+  saveRDS(clustered_reductions_grob, file = paste0(out$base, "/clustered_reductions_grob.rds"))
   # TODO: add clustered_reductions and groupings_vs_reductions to output
 
   cat("\nDONE!\n\n")
