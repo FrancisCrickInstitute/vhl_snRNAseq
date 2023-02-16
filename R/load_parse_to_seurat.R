@@ -1,14 +1,18 @@
 load_parse_to_seurat <-
-  function(dge_dir,
+  function(parse_dir,
+           experiment,
+           genome,
+           sublibrary,
+           parse_analysis_subdir,
            min_nFeature_RNA,
            min_cells_per_gene,
            sample_subset,
            remove_na_samples = F,
-           do_add_sample_metadata = F,
-           parse_pipeline_dir = NULL,
-           experiment = NULL) {
+           do_add_sample_metadata = F) {
 
     # read in DGE matrix
+    sublib_dir <- paste(parse_dir, "/analysis/", experiment, genome, sublibrary, sep = "/")
+    dge_dir <- paste(sublib_dir, parse_analysis_subdir, sep = "/")
     dge_mat <- Seurat::ReadParseBio(dge_dir)
 
     # read in cell metadata
@@ -22,9 +26,7 @@ load_parse_to_seurat <-
       Seurat::CreateSeuratObject(
         names.field = 0,
         meta.data = cell_metadata,
-        # keep cells that have at least n genes
         min_genes = min_genes_per_cell,
-        # keep genes expressed in at least n cells
         min_cells = min_cells_per_gene
       )
 
@@ -40,7 +42,18 @@ load_parse_to_seurat <-
 
     # add sample metadata
     if(do_add_sample_metadata == T) {
-      seu <- add_sample_metadata(seu, parse_pipeline_dir, experiment)
+
+      # read in sample metadata
+      sample_metadata <- paste0(parse_dir, "/expdata/", experiment, "/sample_metadata.tsv") %>%
+        readr::read_tsv(show_col_types = F)
+
+      # add to Seurat object meta.data
+      seu@meta.data <- seu@meta.data %>% dplyr::left_join(sample_metadata, by = "sample")
+      rownames(seu@meta.data) <- colnames(seu)
+
+      # add sample-level table to misc slot
+      seu@misc$sample_metadata <- sample_metadata
+
     }
 
     return(seu)

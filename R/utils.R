@@ -10,44 +10,6 @@ greplany <- function(patterns, v) {
   return(match)
 }
 
-# Define the output directory for the analysis
-define_out <- function(
-    experiment,
-    genome,
-    sublibrary,
-    parse_analysis_subdir,
-    out_dir,
-    do_filtering,
-    do_integration,
-    do_timestamp
-) {
-  out <- list(
-    base = "",
-    args = "arguments_for_analyse_parse.R",
-    seu_pre_qc = "seu_pre_qc.rds",
-    seu_post_filtering = "seu_post_filtering.rds",
-    seu_transformed = "seu_tranformed.rds",
-    seu_split_transformed = "seu_split_transformed.rds",
-    seu_umap = "seu_umap.rds",
-    seu_celldex_annot = "seu_celldex_annot.rds"
-  )
-  if (is.null(out_dir)) {
-    out <- "out/" %>%
-      paste(experiment, genome, sublibrary, parse_analysis_subdir, sep = "/") %>%
-      { if(do_filtering) paste0(., "/filtered/") else . } %>%
-      { if(do_integration) paste0(., "/integrated/") else . } %>%
-      { if(do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . } %>%
-      { purrr::map(out, function(x) paste0(., x)) }
-  } else {
-    out <- out %>% purrr::map(function(x) paste0(out_dir, "/", x))
-  }
-
-  dir.create(out$base, showWarnings = F, recursive = T)
-  cat("Output will be saved to", out$base, "\n")
-
-  return(out)
-}
-
 # Get base_dir
 get_base_dir <- function() {
   if (Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local") {
@@ -87,41 +49,6 @@ get_summary_stats <- function(
     dplyr::filter(
       statistic %in% statistics
     )
-}
-
-# Get sample metadata for the experiment
-add_sample_metadata <- function(seu, parse_pipeline_dir, experiment) {
-
-  # load sample metadata
-  sample_metadata <- paste(parse_pipeline_dir,
-                           "expdata",
-                           experiment,
-                           "sample_metadata.tsv",
-                           sep = "/") %>%
-    readr::read_tsv(show_col_types = FALSE) %>%
-    janitor::clean_names() %>%
-    # add patient x sample type label
-    dplyr::mutate(
-      sample_type_code = dplyr::case_when(
-        sample_type == "renal_cyst" ~ "c",
-        sample_type == "solid" ~ "t",
-        sample_type == "normal_renal" ~ "n",
-        sample_type == "metastasis" ~ "met",
-        sample_type == "mixed" ~ "mix",
-        TRUE ~ sample_type
-      ),
-      sample_label = paste0(sample, "_", sample_type_code)
-    )
-
-  # add to Seurat object meta.data
-  seu@meta.data <- seu@meta.data %>% dplyr::left_join(sample_metadata, by = "sample")
-  rownames(seu@meta.data) <- colnames(seu)
-
-  # add sample-level table to misc slot
-  seu@misc$sample_metadata <- sample_metadata
-
-  return(seu)
-
 }
 
 # Annotate proportions of relevant transcript types
