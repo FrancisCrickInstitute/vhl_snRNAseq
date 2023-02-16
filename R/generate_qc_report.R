@@ -642,6 +642,15 @@ generate_qc_report <- function(experiment,
 
   }
 
+  # literature markers
+  # # checking that all markers have been found
+  # unmatched_markers <- unlist(literature_markers)[
+  #   !(unlist(literature_markers) %in% unique(rownames(seu@assays$RNA)))
+  # ]
+  # if(length(unmatched_markers) > 0) {
+  #   warning("Marker(s) ", paste(unmatched_markers, collapse = ", "), " not found!")
+  # }
+
   # SAVE PLOTS ----
   # save plots as pdf and list
   cat("Saving all plots to", paste0(out$base, "/qc_report_plots.pdf"), "...\n")
