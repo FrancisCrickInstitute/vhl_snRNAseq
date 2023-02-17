@@ -15,22 +15,21 @@
 #' @param n_dims Optional. The dimensionality of the dataset to use for downstream analysis. This is the number of principal components believed to capture the majority of true biological signal in the dataset. This can be decided by consulting the elbow plot. If no value given, dimensionality is calculated using the `intrinsicDimensions` package.
 #' @param cluster_resolutions Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.
 #' @param final_clustering_resolution Optional. The chosen clustering resolution of the dataset to use for downstream analysis. This is the resolution at which clusters appear to capture true biological groupings of interest in the dataset. This can be decided by consulting the clustering tree. If no value given, downstream analysis will not proceed.
-#' @param out_dir Optional. Output directory. If no value given, the output will be saved to a path that mirrors the Parse Biosciences split-pipe analysis structure (analysis/*).
+#' @param out_dir Optional. Output directory. If no value given, the output will be saved to `out/{experiment}/{genome}/{sublibrary}/{parse_analysis_subdir}/{integrated,unintegrated}`.
 #' @param sample_subset Optional. Vector of sample IDs to subset to.
-#' @param do_timestamp If `TRUE`, will save the output in a time-stamped subdirectory.
-#' @param do_integration If `TRUE`, will integrate the dataset.
+#' @param do_timestamp If `TRUE`, will save the output to a time-stamped subdirectory (e.g. `20230217_105554/`).
+#' @param do_integration If `TRUE`, will integrate the dataset and save the output to `integrated/` subdirectory. If `FALSE` (default), output will save to `unintegrated/` subdirectory.
 #' @param integration_col If `do_integration` is `TRUE`, Seurat metadata column upon which to integrate the dataset.
 #' @return A Seurat object.
 #'
 #' @export
-analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
+analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
                              experiment,
                              genome = "hg38",
                              sublibrary = "comb",
                              parse_analysis_subdir = "all-well/DGE_unfiltered/",
-                             sample_metadata_file,
                              do_filtering = T,
-                             remove_doublets = T,
+                             remove_doublets = F,
                              min_nuclei_per_gene = 5,
                              max_nCount_RNA = NULL,
                              min_nFeature_RNA = NULL,
@@ -47,6 +46,10 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # capture arguments
   args <- as.list(environment())
+
+
+  # check arguments
+  check_analyse_snRNAseq_args(args)
 
   # for test runs
   # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_unfiltered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
@@ -69,8 +72,8 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   out <- {
     # if out_dir not given, use same output structure as in the parse analysis/ directory
     if(is.null(out_dir)) "out/" %>%
-      paste0(gsub(".*\\/analysis\\/", "", parse_dge_dir), "/") %>%
-      { if(do_integration) paste0(., "/integrated/") else . } %>%
+      paste(experiment, genome, sublibrary, parse_analysis_subdir, sep = "/") %>%
+      { if(do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/")} %>%
       { if(do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
     # if out_dir is given, use out_dir
     else out_dir
@@ -85,16 +88,19 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   if("args" %in% ls()) { dput(args, paste0(out$base, "/args_for_generate_qc_report.R")) }
 
   # sample groupings to check at clustering stage
-  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin", "doublet",
-                 "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size") %>%
+  groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin",
+                 "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size", "fuhrman_grade") %>%
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
-    { if (grepl("hg38", genome)) c(., "Phase") else . }
+    { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
+    # if checking for doublets, add to the groupings
+    { if (remove_doublets) c(., "doublet") else . }
 
   # LOAD DATA ----
+  cat("\n\nLOAD DATA ----\n\n")
 
   # load parse pipeline output to seurat object with no cut-offs, remove sample
   # NAs, add sample_metadata, add summary_stats, optionally subset samples
-  cat("Creating Seurat object...\n")
+  cat("Creating Seurat object and filtering nuclei per gene...\n")
   seu <- load_parse_to_seurat(
     parse_dir,
     experiment,
@@ -102,7 +108,8 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     sublibrary,
     parse_analysis_subdir,
     min_nFeature_RNA = 0,
-    min_nuclei_per_gene = 0,
+    # perform gene filtering
+    min_nuclei_per_gene = min_nuclei_per_gene,
     sample_subset,
     remove_na_samples = T,
     do_add_sample_metadata = T,
@@ -112,16 +119,10 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # save seu object
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
+  # read seu object: # seu <- readRDS(paste0(out$base, "/seu.rds"))
 
-  # plot summary stats
-  cat("Plotting summary stats...\n")
-  plots[["run_summary_stats"]] <- seu@misc$summary_stats %>%
-    ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
-    ggplot2::geom_col() +
-    ggplot2::facet_grid(statistic ~ ., scales = "free") +
-    ggplot2::labs(title = "per-sample summary statistics")
-
-  # CELL AND GENE FILTERING ----
+  # NUCLEUS AND GENE FILTERING ----
+  cat("\n\nNUCLEUS AND GENE FILTERING ----\n\n")
   # gene-level (min_nuclei_per_gene)
   # -> genes that are present in very few nuclei of the dataset (<3) are uninformative
   #    and unlikely to play any part in differentiating groups of nuclei (in general,
@@ -134,10 +135,16 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   #    apoptosis (for scRNA-seq, not snRNA-seq)
   # -> high % of globin and low % of ribo suggests erythrocytes
   # -> high features:counts per nucleus ratio could be dying cells
+  plots[["nucleus_and_gene_filtering"]] <- list()
 
   # identify doublets (by creating artificial doublets and looking at their clustering)
-  cat("Annotating suspected doublets...\n")
-  seu <- annotate_doublets(seu)
+  # remove_doublets = F
+  if(remove_doublets == T) {
+    cat("Annotating suspected doublets...\n")
+    seu <- annotate_doublets(seu)
+  } else {
+    seu$doublet <- 0
+  }
 
   # get proportions of relevant transcript types
   cat("Annotating abundance of different transcript types...\n")
@@ -146,7 +153,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   # get user-defined filters or designate filters
   # -> nCount/Feature_RNA, percent_mito = median plus 5 x the median absolute deviation
   #    (recommended by https://romanhaa.github.io/projects/scrnaseq_workflow)
-  # -> min_nFeature_RNA/min_nuclei_per_gene = defaults recommended by Parse
+  # -> min_nFeature_RNA = defaults recommended by Parse
   seu <- get_filters(
     seu,
     do_filtering,
@@ -157,17 +164,32 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     max_percent_mito
   )
 
+  # save filters
+  seu@misc$nucleus_filtering %>%
+    tidyr::pivot_wider(id_cols = c(nucleus, sample, dplyr::ends_with("_nucleus"))) %>%
+    readr::write_tsv(paste0(out$base, "seu_nucleus_filtering.tsv"))
+
   # nuclei per sample
   cat("Plotting nuclei per sample...\n")
-  plots[["nuclei_per_sample_bar"]] <-
+  plots[["nucleus_and_gene_filtering"]][["nuclei_per_sample_bar"]] <-
     dplyr::tibble(sample_id = names(table(seu$sample)),
                   n_nuclei = table(seu$sample)) %>%
     ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_nuclei)) +
     ggplot2::geom_col() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
+
+  # plot summary stats
+  cat("Plotting summary stats...\n")
+  plots[["nucleus_and_gene_filtering"]][["run_summary_stats"]] <-
+    seu@misc$summary_stats %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
+    ggplot2::geom_col() +
+    ggplot2::facet_grid(statistic ~ ., scales = "free") +
+    ggplot2::labs(title = "per-sample summary statistics")
+
   # plot filters on distributions
-  plots[["filters_vln"]] <-
+  plots[["nucleus_and_gene_filtering"]][["filters_vln"]] <-
     seu@misc$nucleus_filtering %>%
     dplyr::group_by(name) %>%
     dplyr::mutate(name = paste0(name,
@@ -187,7 +209,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     ggplot2::scale_colour_manual(values = c("red", "black"))
 
   # plot doublets
-  plots[["doublets_per_sample"]] <-
+  plots[["nucleus_and_gene_filtering"]][["doublets_per_sample"]] <-
     seu@misc$nucleus_filtering %>%
     dplyr::group_by(sample) %>%
     dplyr::mutate(n_doublets = sum(name == "doublet" & value == 1)) %>%
@@ -213,9 +235,9 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # plot transcript type abundances
   cat("Plotting abundance of different transcript types...\n")
-  plots[["filters_scatter"]] <-
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", filters) +
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", filters)
+  plots[["nucleus_and_gene_filtering"]][["filters_scatter"]] <-
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito") +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA")
 
   # filtering
   if(do_filtering == T) {
@@ -223,19 +245,16 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     # perform nucleus filtering
     cat("Filtering nuclei...\n")
     cat(dplyr::n_distinct(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus), "/", nrow(seu), "nuclei retained\n")
-    seu <- subset(seu, nuclei = unique(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus))
+    seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus))
 
-    # perform gene filtering
-    cat("Filtering genes...\n")
-    cat(dplyr::n_distinct(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene), "/", ncol(seu), "genes retained"
-
-    seu <- subset(seu, features = unique(dplyr::filter(seu@misc$gene_filtering, include_gene)$gene))
+    # save
+    saveRDS(seu, paste0(out$base, "seu_filtered.rds"))
 
   }
 
   # highest expressed genes
   # cat("Plotting top 20 most highly expressed genes...\n")
-  # plots[["top_genes_boxplot"]] <- boxplot_top_genes(seu)
+  # plots[["nucleus_and_gene_filtering"]][["top_genes_boxplot"]] <- boxplot_top_genes(seu)
   # TODO: fix this - it kills the job, too memory intensive
 
   # highest variable genes (HVGs)
@@ -244,13 +263,13 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # plot hvgs
   cat("Plotting HVGs...\n")
-  plots[["hvg_scatter"]] <- Seurat::LabelPoints(
+  plots[["nucleus_and_gene_filtering"]][["hvg_scatter"]] <- Seurat::LabelPoints(
     plot = Seurat::VariableFeaturePlot(seu, raster = F),
     points = head(Seurat::VariableFeatures(seu), 10),
     repel = T
   ) +
     ggplot2::theme(legend.position = "top")
-  plots[["hvg_heatmap"]] <- dittoSeq::dittoHeatmap(
+  plots[["nucleus_and_gene_filtering"]][["hvg_heatmap"]] <- dittoSeq::dittoHeatmap(
     seu,
     genes = head(Seurat::VariableFeatures(seu), 20),
     annot.by = "sample",
@@ -259,6 +278,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   if (do_integration == T) {
     # INTEGRATION ----
+    cat("\n\nINTEGRATION ----\n\n")
     cat("Integrating samples...\n")
 
     seu_list <- seu %>%
@@ -288,6 +308,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   } else {
     # NORMALISATION AND SCALING (SCTransform) ----
+    cat("\n\nNORMALISATION AND SCALING (SCTransform) ----\n\n")
     cat("Running SCTransform() for normalisation and scaling...\n")
     seu <- Seurat::SCTransform(seu)
 
@@ -305,6 +326,8 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   )
 
   # LINEAR DIMENSIONALITY REDUCTION (PCA) ----
+  cat("\n\nLINEAR DIMENSIONALITY REDUCTION (PCA) ----\n\n")
+  plots[["linear_dimensionality_reduction"]] <- list()
 
   # run PCA
   cat("Running PCA...\n")
@@ -333,30 +356,35 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # elbow plot
   cat("Plotting elbow plot...\n")
-  plots[["pca_elbow"]] <- Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
+  plots[["linear_dimensionality_reduction"]][["pca_elbow"]] <-
+    Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
+    ggplot2::geom_vline(ggplot2::aes(xintercept = final_n_dims), colour = "chosen n dims",
+                        alpha = 0.5)
     ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims_iD, colour = "intrisicDimensions"),
                         linetype = "dashed") &
     ggplot2::geom_vline(ggplot2::aes(xintercept = generous_n_dims, colour = "generous (iD x 2)"),
                         linetype = "dashed") &
     ggplot2::scale_colour_manual(
       name = "n_dims cut-off",
-      values = c(user_provided = dittoSeq::dittoColors()[[1]],
+      values = c(final_n_dims = "red",
+                 user_provided = dittoSeq::dittoColors()[[1]],
                  intrisicDimensions = dittoSeq::dittoColors()[[2]],
                  `generous (iD x 2)` = dittoSeq::dittoColors()[[3]])
     ) &
     ggplot2::theme(legend.position = c(0.7, 0.9),
                    legend.background = element_rect(fill = "white"))
   if(!is.null(n_dims)) {
-    plots[["pca_elbow"]] <- plots[["pca_elbow"]] &
+    plots[["linear_dimensionality_reduction"]][["pca_elbow"]] <-
+      plots[["linear_dimensionality_reduction"]][["pca_elbow"]] &
       ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims, colour = "user_provided"),
                           linetype = "dashed")
   }
 
   # plot pca dims
   cat("Plotting principle components...\n")
-  plots[["pca_dim_loadings"]] <-
+  plots[["linear_dimensionality_reduction"]][["pca_dim_loadings"]] <-
     Seurat::VizDimLoadings(seu, dims = 1:4, reduction = "pca")
-  plots[["pca_dim_heatmap"]] <-
+  plots[["linear_dimensionality_reduction"]][["pca_dim_heatmap"]] <-
     Seurat::DimHeatmap(
       seu,
       dims = 1:final_n_dims,
@@ -367,23 +395,20 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     )
 
   # NON-LINEAR DIMENSIONALITY REDUCTION (UMAP, t-SNE) ----
+  cat("\n\nNON-LINEAR DIMENSIONALITY REDUCTION (UMAP, t-SNE) ----\n\n")
+  plots[["nonlinear_dimensionality_reduction"]] <- list()
 
   # run t-SNE and UMAP
   seu <- Seurat::RunTSNE(seu)
   seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 
   # plot projection of different sample features in different reductions
-  plots[["umap_vs_sample_label"]] <- dittoSeq::dittoDimPlot(seu,
-                                                            "sample_label",
-                                                            reduction.use = "umap",
-                                                            raster = F)
+  plots[["nonlinear_dimensionality_reduction"]][["umap_vs_sample_label"]] <-
+    dittoSeq::dittoDimPlot(seu, "sample_label", reduction.use = "umap", raster = F)
 
   # split out sample clusters, side-by-side
-  plots[["umap_split_by_patient"]] <-
-    dittoSeq::dittoDimPlot(seu,
-                           "sample_label",
-                           reduction.use = "umap",
-                           split.by = "patient_id")
+  plots[["nonlinear_dimensionality_reduction"]][["umap_split_by_patient"]] <-
+    dittoSeq::dittoDimPlot(seu, "sample_label", reduction.use = "umap", split.by = "nih_pid")
 
   # plot all reduction / grouping projections, side-by-side with sample annots for comparison
   groupings_vs_reductions <- list()
@@ -404,18 +429,9 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     })
   })
 
-  # convert to grob
-  groupings_vs_reductions_grob <- marrangeGrob(
-    grobs = groupings_vs_reductions,
-    nrow = length(groupings),
-    ncol = length(Seurat::Reductions(seu)),
-    layout_matrix = matrix(1:length(groupings_vs_reductions),
-                           length(groupings),
-                           length(Seurat::Reductions(seu)) + 1,
-                           TRUE)
-  )
-
   # CLUSTERING ----
+  cat("\n\nCLUSTERING ----\n\n")
+  plots[["clustering"]] <- list()
 
   # cluster data at different resolutions
   cat("Clustering data at different resolutions...\n")
@@ -426,15 +442,15 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
   # identify clusters of nuclei by a shared nearest neighbours modularity
   # optimisation based clustering algorithm
-  seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions)
+  seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = F)
   saveRDS(seu, file = paste0(out$base, "/seu_transformed_and_clustered.rds"))
 
   # cluster tree plot of increasing resolutions
   cat("Plotting clustering tree at different resolutions...\n")
   snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
-  plots[["clustering_tree"]] <- clustree::clustree(
-    seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
-    prefix = snn_res_prefixes)
+  plots[["clustering"]][["clustering_tree"]] <-
+    clustree::clustree(seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
+                       prefix = snn_res_prefixes)
 
   # plot clustering of reductions at different resolutions
   cat("Plotting reductions of clusters at different resolutions...\n")
@@ -456,17 +472,6 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
         )
     })
   })
-
-  # convert to grob
-  clustered_reductions_grob <- marrangeGrob(
-    grobs = clustered_reductions,
-    nrow = length(clustering_resolutions),
-    ncol = length(Seurat::Reductions(seu)),
-    layout_matrix = matrix(1:length(clustered_reductions),
-                           length(clustering_resolutions),
-                           length(Seurat::Reductions(seu)),
-                           TRUE)
-  )
 
   # choose a resolution
   if(!is.null(final_clustering_resolution)) { # final_clustering_resolution=0.3
@@ -491,12 +496,14 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
         seu$cluster %>% unique() %>% length()
       ))
 
-    # ANNOTATION ----
+    # CELLTYPE ANNOTATION ----
+    cat("\n\nCELLTYPE ANNOTATION ----\n\n")
+    plots[["celltype_annotation"]] <- list()
 
     # gene modules scoring
     gene_modules %>% names %>%
       purrr::walk(function(module) {
-        cat(module, "\n")
+        cat("Scoring gene module", module, "\n")
         seu <<- Seurat::AddModuleScore(
           seu,
           features = list(gene_modules[[module]]),
@@ -504,14 +511,14 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
           nbin = 10
         )
         # umap
-        plots[[paste0("umap_vs_", module, "_module_score")]] <<-
+        plots[["celltype_annotation"]][[paste0("umap_vs_", module, "_module_score")]] <<-
           dittoSeq::dittoDimPlot(seu,
                                  paste0(module, "1"),
                                  main = paste0(module, " module (n=", length(gene_modules[[module]]), ")")) +
-          plots[["umap_vs_sample_label"]]
+          plots[["celltype_annotation"]][["umap_vs_sample_label"]]
         # ridgeplot
-        plots[[paste0(module, "_module_score_vs_sample_type_ridge")]] <<-
-          dittoSeq::dittoRidgePlot(seu, paste0(module, "1"), group.by = "sample_type")
+        plots[["celltype_annotation"]][[paste0(module, "_module_score_vs_lesion_type_ridge")]] <<-
+          dittoSeq::dittoRidgePlot(seu, paste0(module, "1"), group.by = "lesion_type")
       })
 
     # celldex annotations from the human primary cell atlas
@@ -523,17 +530,17 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     )
 
     # plot heatmap of annotation scores
-    plots[["singler_annots_heatmap"]] <-
+    plots[["celltype_annotation"]][["singler_annots_heatmap"]] <-
       SingleR::plotScoreHeatmap(
         seu_singler,
         annotation_col = data.frame(
-          patient = seu$patient_id,
-          sample_type = seu$sample_type
+          patient = seu$nih_pid,
+          lesion_type = seu$lesion_type
         )
       )
 
-    # plot delta of cell type annotations
-    plots[["singler_annots_delta_dist"]] <-
+    # plot delta of celltype annotations
+    plots[["celltype_annotation"]][["singler_annots_delta_dist"]] <-
       SingleR::plotDeltaDistribution(seu_singler)
 
     # add cell type annotations
@@ -555,15 +562,15 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
                     label = paste0(singler_annot, " (", prop, "%)")) %>%
       dplyr::filter(prop == max(prop) & prop > 50 | max(prop) < 50 & rank(-prop) <= 2) %>%
       dplyr::summarise(label = paste0("cluster ", unique(cluster), " (n = ", unique(total), ")\n", paste(label, collapse = "\n"))) %>%
-      {dplyr::left_join(seu@meta.data[, "cluster", drop = F], multiple = "all", .)} %>%
+      {dplyr::left_join(seu@meta.data[, "cluster", drop = F], multiple = "all", ., by = "cluster")} %>%
       dplyr::pull(label)
 
     # plot cell types against reduction
-    plots[["umap_vs_singler_annot"]] <-
+    plots[["celltype_annotation"]][["umap_vs_singler_annot"]] <-
       dittoSeq::dittoDimPlot(seu, "singler_annot", size = 0.7) +
       ggplot2::geom_label(
         data = seu@meta.data %>%
-          dplyr::right_join(get_centroids(seu, "umap", cluster)) %>%
+          dplyr::right_join(get_centroids(seu, "umap", cluster), by = "cluster") %>%
           dplyr::distinct(cluster, singler_annot_label, x, y),
         ggplot2::aes(x, y, label = singler_annot_label),
         size = 3, fill = 'white', color = 'black', alpha = 0.5, label.size = 0,
@@ -571,10 +578,10 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
         vjust = "inward", hjust = "inward"
       ) +
       ggplot2::labs(title = "majority celldex annotation(s) per cluster") +
-      plots[["umap_vs_sample_label"]]
+      plots[["celltype_annotation"]][["umap_vs_sample_label"]]
 
     # plot cell type composition of samples
-    plots[["singler_annot_bar"]] <-
+    plots[["celltype_annotation"]][["singler_annot_bar"]] <-
       dittoSeq::dittoBarPlot(
         seu,
         var = "singler_annot",
@@ -595,7 +602,7 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
       )
 
     # alluvial plots
-    plots[["alluvial_sample_cluster_singler"]] <-
+    plots[["celltype_annotation"]][["alluvial_sample_cluster_singler"]] <-
       seu@meta.data %>%
       dplyr::group_by(sample, cluster, singler_annot) %>%
       dplyr::count() %>%
@@ -630,7 +637,9 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
     # save annotated seu
     saveRDS(seu, file = paste0(out$base, "/seu_annotated.rds"))
 
-    # TODO: GENE ONTOLOGY ----
+    # TODO: PATHWAY ANALYSIS ----
+    cat("\n\nPATHWAY ANALYSIS ----\n\n")
+    plots[["pathway_analysis"]] <- list()
 
     # set identities based on the final clustering resolution
     seu <- Seurat::SetIdent(
@@ -645,8 +654,8 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
 
     # plot heatmap of pathway expression values
     # (ranks pathways based on their expression difference)
-    ReactomeGSA::plot_gsva_heatmap(gsva_result, max_pathways = 15)
-
+    plots[["pathway_analysis"]][["reactome_gsa_heatmap"]] <-
+      ReactomeGSA::plot_gsva_heatmap(gsva_result, max_pathways = 15)
 
   }
 
@@ -660,23 +669,62 @@ analyse_snRNAseq <- function(parse_analysis_dir = "/camp/project/tracerX/working
   # }
 
   # SAVE PLOTS ----
+  cat("\n\nSAVE PLOTS ----\n\n")
   # save plots as pdf and list
   cat("Saving all plots to", paste0(out$base, "/qc_report_plots.pdf"), "...\n")
   if (length(dev.list()) != 0) { dev.off() }
-  plots_grob <- marrangeGrob(grobs = plots, nrow = 1, ncol = 1)
-  ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
-         width = 20, height = 20, units = "cm")
+
+  # plot lists of plots
+  names(plots) %>%
+    purrr::walk(function(section) {
+      section_plots_file <- paste0(out$base, "/", section, "_plots.pdf")
+      cat("Plotting section", section, "plots...\nSaving to\n", section_plots_file, "\n")
+      pdf(section_plots_file)
+      names(plots[[section]]) %>%
+        purrr::walk(function(p) {
+          cat("Plotting", p, "\n")
+          print(plots[[section]][[p]])
+        })
+      dev.off()
+    })
+  if (length(dev.list()) != 0) { dev.off() }
+  # ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
+  #        width = 20, height = 20, units = "cm")
+  # saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
+
+  # plot groupings vs reductions grob
+  cat(paste0(out$base, "/groupings_vs_reductions.pdf\n"))
+  # convert to grob
+  groupings_vs_reductions_grob <- marrangeGrob(
+    grobs = groupings_vs_reductions,
+    nrow = length(groupings),
+    ncol = length(Seurat::Reductions(seu)),
+    layout_matrix = matrix(1:length(groupings_vs_reductions),
+                           length(groupings),
+                           length(Seurat::Reductions(seu)) + 1,
+                           TRUE)
+  )
   ggsave(paste0(out$base, "/groupings_vs_reductions.pdf"), groupings_vs_reductions_grob,
-  width = 20, height = 60, units = "cm")
+         width = 20, height = 60, units = "cm")
+  if (length(dev.list()) != 0) { dev.off() }
+
+  # plot clustered reductions grob
+  cat(paste0(out$base, "/clustered_reductions.pdf\n"))
+  # convert to grob
+  clustered_reductions_grob <- marrangeGrob(
+    grobs = clustered_reductions,
+    nrow = length(clustering_resolutions),
+    ncol = length(Seurat::Reductions(seu)),
+    layout_matrix = matrix(1:length(clustered_reductions),
+                           length(clustering_resolutions),
+                           length(Seurat::Reductions(seu)),
+                           TRUE)
+  )
   ggsave(paste0(out$base, "/clustered_reductions.pdf"), clustered_reductions_grob,
          width = 20, height = 60, units = "cm")
   if (length(dev.list()) != 0) { dev.off() }
-  saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
-  saveRDS(groupings_vs_reductions_grob, file = paste0(out$base, "/groupings_vs_reductions_grob.rds"))
-  saveRDS(clustered_reductions_grob, file = paste0(out$base, "/clustered_reductions_grob.rds"))
-  # TODO: add clustered_reductions and groupings_vs_reductions to output
 
-  cat("\nDONE!\n\n")
+  cat("\n\nDONE!\n\n")
 
   return(seu)
 

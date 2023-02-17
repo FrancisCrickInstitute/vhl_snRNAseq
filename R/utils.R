@@ -10,6 +10,16 @@ greplany <- function(patterns, v) {
   return(match)
 }
 
+# Check analyse_snRNAseq args
+check_analyse_snRNAseq_args <- function(args) {
+  list2env(args,globalenv())
+  dge_dir <- paste(parse_dir, "analysis", experiment, genome, sublibrary, parse_analysis_subdir, sep = "/")
+  if(!all(c("DGE.mtx", "all_genes.csv", "cell_metadata.csv") %in% list.files(dge_dir))) {
+    stop("Provided directory:\n\n", dge_dir, "\n\ndoes not exist or is not a Parse Biosciences split-pipe analysis directory.",
+         " Must contain DGE.mtx, all_genes.csv, and cell_metadata.csv files.")
+  }
+}
+
 # Get base_dir
 get_base_dir <- function() {
   if (Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local") {
@@ -51,7 +61,8 @@ annotate_proportions_of_transcript_types <- function(seu) {
 # Annotate doublets using the scDblFinder package
 annotate_doublets <- function(seu) {
   seu_dbl <- scDblFinder::scDblFinder(
-    Seurat::as.SingleCellExperiment(seu), samples = "sample"
+    Seurat::as.SingleCellExperiment(seu), samples = "sample",
+    BPPARAM = BiocParallel::MulticoreParam(3)
   )
   seu$doublet <- as.numeric(seu_dbl$scDblFinder.class == "doublet")
   return(seu)
@@ -90,19 +101,20 @@ plot_genes_per_nucleus_dist <- function(seu) {
 }
 
 # Plot nucleus scatter with filters
-plot_nucleus_scatter_with_filters <- function(seu, x, y, filters, ...) {
+plot_nucleus_scatter_with_filters <- function(seu, x, y, ...) {
+  #filters <- seu@misc$filters
   dat <- seu@meta.data %>%
     tibble::as_tibble(rownames = "nucleus") %>%
     dplyr::mutate(x_var = get(x), y_var = get(y),
-                  include = x_var >= filters[[x]]$min & x_var <= filters[[x]]$max &
-                    y_var >= filters[[y]]$min & y_var <= filters[[y]]$max,
+                  include = x_var >= seu@misc$filters[[x]]$min & x_var <= seu@misc$filters[[x]]$max &
+                    y_var >= seu@misc$filters[[y]]$min & y_var <= seu@misc$filters[[y]]$max,
                   n_include = sum(include),
                   n_exclude = dplyr::n() - include,
                   title = paste0("include=", n_include, ", exclude=", n_exclude))
   dat %>%
     ggplot2::ggplot(ggplot2::aes(x = x_var, y = y_var, colour = include)) +
-    ggplot2::geom_vline(xintercept = unlist(filters[[x]]), colour = "red") +
-    ggplot2::geom_hline(yintercept = unlist(filters[[y]]), colour = "red") +
+    ggplot2::geom_vline(xintercept = unlist(seu@misc$filters[[x]]), colour = "red") +
+    ggplot2::geom_hline(yintercept = unlist(seu@misc$filters[[y]]), colour = "red") +
     ggplot2::geom_point(size = 0.5) +
     ggplot2::labs(title = unique(dat$title),
                   x = x,
@@ -160,9 +172,9 @@ get_filters <- function(seu,
     tidyr::pivot_longer(-c(nucleus, sample)) %>%
     dplyr::left_join(filters %>%
                        purrr::map(dplyr::as_tibble) %>%
-                       dplyr::bind_rows(.id = "name")) %>%
-    dplyr::mutate(n_nuclei = dplyr::n_distinct(nucleus),
-                  include = value >= min & value <= max,
+                       dplyr::bind_rows(.id = "name"),
+                     by = "name") %>%
+    dplyr::mutate(include = value >= min & value <= max,
                   exclude_criteria = ifelse(include == F, name, NA)) %>%
     dplyr::group_by(nucleus) %>%
     dplyr::mutate(include_nucleus = all(include),
@@ -170,15 +182,7 @@ get_filters <- function(seu,
                     paste(collapse = ",") %>% dplyr::na_if(., "")
     )
 
-  # create misc table of included/excluded genes
-  seu@misc$gene_filtering <- tibble::tibble(
-    gene = rownames(seu),
-    n_genes = dplyr::n_distinct(gene),
-    n_transcripts = Matrix::rowSums(seu),
-    n_nuclei = rowSums(as.matrix(seu@assays$RNA@counts) > 0)
-  ) %>%
-    dplyr::mutate(min = min_nuclei_per_gene,
-                  include_gene = n_nuclei >= min)
+  return(seu)
 }
 
 # Generate a boxplot of the top n genes
