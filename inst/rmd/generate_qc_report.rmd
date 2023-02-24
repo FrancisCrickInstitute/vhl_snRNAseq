@@ -1,25 +1,374 @@
 ---
 title: "VHL snRNAseq report"
 output: html_document
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+geometry: margin=1in
+fontfamily: mathpazo
+fontsize: 11pt
 ---
 
-``` {r setup}
-knitr::opts_chunk$set(echo = FALSE, 
-                      message = FALSE, 
-                      warning = FALSE, 
-                      cache = FALSE)
-# pass params to the global environment
-list2env(params, globalenv())
+``` {r setup, include = F}
+# load vhl package
+library(devtools)
+load_all()
+
+# set wd
+knitr::opts_chunk$set(root.dir = here::here())
+
+# get arguments and add to the global environment
+args <- dget(here::here("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R"))
+args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/"
+list2env(args, globalenv())
+
+# set ggplot theme
+ggplot2::theme_set(ggplot2::theme_bw())
+ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()),
+                      ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
+
+# define output directory
+out <- {
+    # if out_dir not given, use same output structure as in the parse analysis/ directory
+    if (is.null(out_dir)) "out/" %>%
+      paste(experiment, genome, sublibrary, parse_analysis_subdir, sep = "/") %>%
+      { if (do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/")} %>%
+      { if (do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
+    # if out_dir is given, use out_dir
+    else out_dir
+    # clean path (// -> /)
+  } %>% clean_path() %>% {
+    # pre-set file names (TODO: define these once all outputs are finalised)
+    purrr::map(list(base = ""), function(x) paste0(., x))
+  }
+
+# set sample groupings to check at the clustering stage
+groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin",
+                 "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size", "fuhrman_grade") %>%
+    # if genome is human, do cell cycle scoring (doesn't work with other genomes)
+    { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
+    # if checking for doublets, add to the groupings
+    { if (remove_doublets) c(., "doublet") else . }
+```
+
+All outputs will be saved to `r out$base`.
+
+## Load data and filter genes
+
+Load Parse Biosciences split-pipe pipeline output as a Seurat object with no cut-offs, remove any missing samples, add sample metadata, add summary statistics, and optionally subset samples. Then filter nuclei per gene. 
+
+Gene-level filtering is also performed at this point, based on the `min_nuclei_per_gene` argument. Genes that are present in very few nuclei of the dataset (e.g., <3) are uninformative and unlikely to help in differentiating between groups of nuclei. In general, most genes removed by this filtering step will be those not detected in any nuclei, which will help to trim the size of the object. 
+
+The minimum number of nuclei per gene is set to **`r min_nuclei_per_gene`**.
+
+``` {r load_data, warning = F}
+# seu <- load_parse_to_seurat(
+#     parse_dir,
+#     experiment,
+#     genome,
+#     sublibrary,
+#     parse_analysis_subdir,
+#     min_nFeature_RNA = 0,
+#     min_nuclei_per_gene = min_nuclei_per_gene,
+#     sample_subset,
+#     remove_na_samples = T,
+#     do_add_sample_metadata = T,
+#     do_add_summary_stats = T,
+#     groupings
+#   ) 
+# # save seu 
+# saveRDS(seu, file = here::here(out$base, "/seu.rds"))
+seu <- readRDS(here::here(out$base, "/seu.rds"))
+seu <- seu[sample(nrow(seu), nrow(seu)*0.1),sample(ncol(seu), ncol(seu)*0.1)]
 ``` 
 
+## Sample-level overview
+
+Nuclei per sample
+
+```{r nuclei_per_sample_plot, echo = F}
+p <-
+  dplyr::tibble(sample_id = names(table(seu$sample)),
+                n_nuclei = table(seu$sample)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_nuclei)) +
+  ggplot2::geom_col() +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
+p
+```
+
+Summary statistics
+
+```{r summary_statistics_plot, echo = F}
+p <-
+  seu@misc$summary_stats %>%
+  ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
+  ggplot2::geom_col() +
+  ggplot2::facet_grid(statistic ~ ., scales = "free") +
+  ggplot2::labs(title = "per-sample summary statistics") +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
+p
+```
+
+## Filter nuclei
+
+Nucleus-level filtering is performed, applying cut-offs to `nCount_RNA`, `nFeature_RNA`, `percent_mito`, and `doublet` values of each nucleus.
+
+* Unusually high transcript / gene counts indicate multiplets.
+* Unusually low transcript / gene counts indicate barcoding of nuclei with damaged membranes, which are likely low-quality and uninformative.
+* A high percentage of mitochondrial genes indicates death, loss of cytoplasmic RNA, or increased apoptosis. Differences in the application of this filter between scRNA-seq and snRNA-seq are not well covered in literature. Intuitively, snRNA-seq data should be treated with a more stringent cut-off, as it should only include nuclear RNA. However, the renal cortex has an exceptionally high level of mitochondrial activity, so this cut-off has been relaxed somewhat for the VHL dataset. 
+* Nuclei with a high nFeature_RNA:nCount_RNA ratio could be from dying cells.
+
+### Annotate doublets
+
+Putative doublets are identified using the `scDblFinder` package. This package creates artificial doublets by grouping together random pairs of nuclei within each sample to create pseudo-doublets, and then identifying nuclei that cluster near to these pseudo-doublets during dimensionality reduction, which means that they carry a doublet signature. 
+
+The `remove_doublets` argument is set to **`r remove_doublets`**.
+`r if (remove_doublets) {"Doublets will be identified and removed." }`
+`r if (!remove_doublets) {"A dummy column will be introduced, treating all nuclei as though they are singlets."}`
+
+```{r identify_doublets, eval = remove_doublets, include = remove_doublets}
+seu <- annotate_doublets(seu)
+```
+
+```{r ignore_doublets, eval = remove_doublets == F, include = remove_doublets == F}
+seu$doublet <- 0
+```
+
+#### `r if (remove_doublets) {"Plot of detected doublets"}`
+
+```{r detected_doublets_plot, eval = remove_doublets, echo = F}
+p <-
+  seu@meta.data[,c("sample", "doublet")] %>% 
+    dplyr::group_by(sample) %>%
+    dplyr::mutate(n_doublets = sum(doublet),
+                  is_doublet = doublet == 1) %>%
+    tidyr::pivot_longer(names(seu@misc$filters)) %>%
+    ggplot2::ggplot(ggplot2::aes(y = value, x = sample, colour = is_doublet)) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(!is_doublet), height = 0) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(is_doublet), height = 0) +
+    ggplot2::labs(title = "detected doublets in each sample (using scDblFinder)") +
+    ggplot2::facet_wrap(~ name, scales = "free") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
+    ditto_colours
+p
+```
+
+### Annotate transcript types
+
+Proportions of transcript types of interest (mitochondrial, ribosomal, globin) are annotated. Mitochondrial genes are particularly of interest for filtering, but it is good practice to inspect the others as well.
+
+* `percent_mito` - See above.
+* `percent_ribo` - mRNA that code for ribosomal proteins. They do not point to specific issues, but it can be good to have a look at their relative abundance. They can have biological relevance.
+* `percent_globin` - Globin genes are very abundant in erythrocytes. Depending on your application, you can expect ‘contamination’ of erythrocytes and select against it.
+
+```{r annotate_transcript_types}
+  seu <- annotate_proportions_of_transcript_types(seu)
+```
+
+### Define nucleus-level filters
+
+The `do_filtering` argument is set to **`r do_filtering`**.
+`r if (do_filtering) {"Filters will be applied." }`
+`r if (!do_filtering) {"Dummy filters will be set (min = -Inf, max = Inf) and all nuclei will be retained." }`
+
+```{r get_filters}
+seu <- get_filters(
+  seu,
+  do_filtering,
+  remove_doublets,
+  min_nCount_RNA,
+  max_nCount_RNA,
+  min_nFeature_RNA,
+  max_nFeature_RNA,
+  max_percent_mito
+)
+```
+
+`r paste(names(unlist(seu@misc$filters)) %>% gsub("\\.", " ", .), unlist(seu@misc$filters), collapse = "  \n", sep = " = ")`
+
+#### Plot of filters vs feature distribution
+
+```{r filters_vs_distribution_vln, echo = F}
+p <- 
+    seu@misc$nucleus_filtering %>%
+    tidyr::pivot_longer(names(seu@misc$filters)) %>%
+    dplyr::left_join(seu@misc$filters %>%
+                       purrr::map(~dplyr::as_tibble(.)) %>%
+                       dplyr::bind_rows(.id = "name"),
+                     by = "name") %>%
+    dplyr::group_by(fail_criteria) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
+    ggplot2::geom_jitter(ggplot2::aes(colour = pass),
+                         height = 0, alpha = 0.5, size = 0.6) +
+    ggplot2::geom_violin(ggplot2::aes(fill = sample), alpha = 0.8,
+                         draw_quantiles = 0.5) +
+    ggplot2::geom_hline(ggplot2::aes(yintercept = min), colour = "red") +
+    ggplot2::geom_hline(ggplot2::aes(yintercept = max), colour = "red") +
+    ggplot2::facet_wrap(~ name, scales = "free") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
+    ditto_colours +
+    ggplot2::scale_colour_manual(values = c("darkgrey", "black"))
+p
+```
+
+#### Plot of the proportions of filtered nuclei and their fail criteria for each sample
+
+```{r fail_criteria_proportions, echo = F}
+p <- 
+     seu@misc$nucleus_filtering %>%
+    dplyr::group_by(sample) %>%
+    dplyr::count(fail_criteria) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample, y = n, fill = fail_criteria)) +
+    ggplot2::geom_col() +
+    ditto_colours
+p
+```
+
+#### Plot of filters vs nucleus scatter
+
+```{r nucleus_scatter_with_filters, echo = F}
+p <- 
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", log_y = T) +
+    ggplot2::theme(legend.position = "none") +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA")
+p
+```
+
+### Apply nucleus-level filters
+
+```{r filter_nuclei, eval = do_filtering, include = do_filtering}
+seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
+
+# save seu_filtered
+saveRDS(seu, here::here(out$base, "seu_filtered.rds"))
+```
+
+```{r calc_n_retained, include = F} 
+n_retained <- nrow(dplyr::filter(seu@misc$nucleus_filtering, pass))
+```
+
+`r paste0(round((n_retained / ncol(seu)) * 100, 1), "% (", n_retained, "/", ncol(seu), ") of nuclei retained.")`
+
+## Highest variable genes
+
+Find the most highly variable genes (HVGs) across samples.
+
+```{r hvg, warnings = F}
+seu <- Seurat::FindVariableFeatures(seu)
+```
+
+#### Plot of HVGs
+
+```{r hvg_scatter, echo = F, warning = F, message = F}
+p <- 
+  Seurat::LabelPoints(
+    plot = Seurat::VariableFeaturePlot(seu, raster = F),
+    points = head(Seurat::VariableFeatures(seu), 10),
+    repel = T
+  ) +
+    ggplot2::theme(legend.position = "top")
+p
+```
+
+#### Heatmap of top 20 HVGs
+
+```{r hvg_heatmap, echo = F}
+p <- 
+  dittoSeq::dittoHeatmap(
+    seu,
+    genes = head(Seurat::VariableFeatures(seu), 20),
+    annot.by = "sample",
+    scaled.to.max = T
+  )
+p
+```
+
+## Integration (optional)
+
+## Normalisation and scaling
+
+Running SCTransform() for normalisation and scaling of the data. 
+
+Variables to regress out of the SCTransform residuals are `r paste(vars_to_regress, collapse = ", ")` (argument `vars_to_regress`). This prevents these variables from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
+
+```{r sctransform, warning = F}
+seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
+
+# save seu_transformed
+saveRDS(seu, file = here::here(out$base, "/seu_transformed.rds"))
+```
+
+## Annotate cell cycle phases
+
+Nuclei are assigned a score representing the likelihood that they are in each phase of the cell cycle. This is based on the expression levels of genes associated with each phase. The highest probability phase of each nucleus is stored in a new "Phase" column of the metadata.
+
+```{r annotate_cell_cycle_phases}
+seu <- Seurat::CellCycleScoring(
+  seu,
+  s.features = Seurat::cc.genes$s.genes,
+  g2m.features = Seurat::cc.genes$g2m.genes
+)
+```
+
+## Linear dimensionality reduction (PCA)
+
+```{r run_pca}
+seu <- Seurat::RunPCA(seu)
+```
+
+### Dimensionality of the data
+
+The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. This can be manually decided by consulting the elbow plot (see below). 
+
+`r if (is.null(n_dims)) {paste0("Dimensionality of the data is **", n_dims, "** (set by argument n_dims).")}`
+`r if (is.null(n_dims)) {"No value provided for n_dims. Dimensionality will be calculated using the intrinsicDimensions package."}`
+
+```{r usr_n_dims, include = !is.null(n_dims), eval = !is.null(n_dims)}
+final_n_dims <- n_dims
+```
+
+Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental as meaningful biological variation may be dropped from downstream analysis. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate.
+
+The dimensionality of the dataset can be estimated using the intrinsicDimension package. This bypasses the manual approach of reading the elbow plot, but can sometimes be a bit too conservative. Therefore, if `n_dims` is not defined by the user, the dimensionality is set as double the intrinsicDimension estimate. 
+
+```{r iD_n_dims}
+n_dims_iD <- intrinsicDimension::maxLikGlobalDimEst(
+    seu@reductions$pca@cell.embeddings,
+    k = 10
+  )$dim.est %>% round(0)
+generous_n_dims <- round(2 * n_dims_iD, 0)
+final_n_dims <- generous_n_dims
+```
+
+#### Elbow plot
+
+```{r elbow_plot, echo = F}
+ p <-
+  Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
+  ggplot2::geom_vline(ggplot2::aes(xintercept = final_n_dims, colour = "chosen n dims"),
+                      alpha = 0.5) &
+  ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims_iD, colour = "intrisicDimensions"),
+                      linetype = "dashed") &
+  ggplot2::geom_vline(ggplot2::aes(xintercept = generous_n_dims, colour = "generous (iD x 2)"),
+                      linetype = "dashed") &
+  ggplot2::scale_colour_manual(
+    name = "n_dims cut-off",
+    values = c(
+      `chosen n dims` = "red",
+      user_provided = dittoSeq::dittoColors()[[1]],
+      intrisicDimensions = dittoSeq::dittoColors()[[2]],
+      `generous (iD x 2)` = dittoSeq::dittoColors()[[3]]
+    )
+  ) &
+  ggplot2::theme(legend.position = c(0.7, 0.9),
+                 legend.background = ggplot2::element_rect(fill = "white"))
+if (!is.null(n_dims)) {
+  p <-
+    p &
+    ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims, colour = "user_provided"),
+                        linetype = "dashed")
+}
+p
+```
+
+## Non-linear dimensionality reduction (UMAP, tSNE)
 
 
-``` {r get_data}
-    library(thepackage)
-    dataset <- get_data(data)
-    dataset_ready <- thepackage:::impute_values(data, impute_func)
-``` 
-
-``` {r summary}
-    summary(dataset_ready)
-``` 

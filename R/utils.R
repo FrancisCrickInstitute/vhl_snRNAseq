@@ -53,8 +53,6 @@ get_max <- function(x, n_mads = 5) { median(x) + n_mads * mad(x) }
 annotate_proportions_of_transcript_types <- function(seu) {
   purrr::pwalk(transcript_types, function(...) {
     tt <- tibble::tibble(...)
-    cat("Calculating %", tt$name, "genes...\n")
-    cat(tt$message, "\n")
     # use `<<` for global assignment
     seu <<- seu %>%
       Seurat::PercentageFeatureSet(pattern = tt$pattern,
@@ -179,12 +177,6 @@ get_filters <- function(seu,
 
   # add to seu
   seu@misc$filters <- filters
-
-  # message filters
-  names(filters) %>%
-    purrr::walk(function(filter) {
-      cat(filter, "range: min =", filters[[filter]]$min, ", max =", filters[[filter]]$max, "\n")
-    })
 
   # create misc table of pass/fail nuclei, with fail criteria
   seu@misc$nucleus_filtering <-

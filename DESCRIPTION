@@ -18,6 +18,7 @@ Imports:
     ggforce,
     ggplot2,
     gridExtra,
+    here,
     intrinsicDimension,
     knitr,
     lemon,

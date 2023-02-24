@@ -14,6 +14,7 @@
 #' @param max_nFeature_RNA \emph{Nucleus filter}. The maximum number of genes detected per nucleus. An unusually high number of genes suggests that the nucleus is a multiplet.
 #' @param max_percent_mito \emph{Nucleus filter}. The maximum percentage of mitochondrial transcripts per nucleus. Overrepresentation of mitochondrial transcripts suggests cell death, loss of cytoplasmic RNA, or heightened apoptosis.
 #' @param n_dims Optional. The dimensionality of the dataset to use for downstream analysis. This is the number of principal components believed to capture the majority of true biological signal in the dataset. This can be decided by consulting the elbow plot. If no value given, dimensionality is calculated using the `intrinsicDimensions` package.
+#' @param vars_to_regress Vector of variables to regress out of the SCTransform residuals. This prevents these variables from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis. Default is c("percent_mito", "nCount_RNA").
 #' @param cluster_resolutions Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.
 #' @param final_clustering_resolution Optional. The chosen clustering resolution of the dataset to use for downstream analysis. This is the resolution at which clusters appear to capture true biological groupings of interest in the dataset. This can be decided by consulting the clustering tree. If no value given, downstream analysis will not proceed.
 #' @param out_dir Optional. Output directory. If no value given, the output will be saved to `out/{experiment}/{genome}/{sublibrary}/{parse_analysis_subdir}/{integrated,unintegrated}`.
@@ -37,6 +38,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                              min_nFeature_RNA = NULL,
                              max_nFeature_RNA = NULL,
                              max_percent_mito = NULL,
+                             vars_to_regress = c("percent_mito", "nCount_RNA"),
                              n_dims = NULL,
                              clustering_resolutions = seq(0.1, 0.8, by = 0.1),
                              final_clustering_resolution = NULL,
@@ -46,6 +48,8 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                              do_integration = F,
                              integration_col = "sample") {
 
+  # SETUP ----
+
   # capture arguments
   args <- as.list(environment())
 
@@ -53,7 +57,8 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   check_analyse_snRNAseq_args(args)
 
   # for internal test runs
-  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=F;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
+  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=F;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
+  # testing: Wu filters # remove_doublets=T;min_nuclei_per_gene = 5;min_nCount_RNA = 300;max_nCount_RNA = 10000;min_nFeature_RNA = 200;max_nFeature_RNA = 10000;max_percent_mito = 8
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101"
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY"
   # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5"
@@ -66,8 +71,8 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   # initiate plots list, set ggplot2 theme
   plots <- list()
   ggplot2::theme_set(ggplot2::theme_bw())
-  ditto_colours <- list(scale_fill_manual(values = dittoSeq::dittoColors()),
-                        scale_colour_manual(values = dittoSeq::dittoColors()))
+  ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()),
+                        ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
 
   # define output directory
   out <- {
@@ -211,7 +216,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
     ggplot2::geom_hline(ggplot2::aes(yintercept = min), colour = "red") +
     ggplot2::geom_hline(ggplot2::aes(yintercept = max), colour = "red") +
     ggplot2::facet_wrap(~ name, scales = "free") +
-    ggplot2::theme(axis.text.x = element_text(angle = 90)) +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
     ditto_colours +
     ggplot2::scale_colour_manual(values = c("darkgrey", "black"))
 
@@ -382,7 +387,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                  `generous (iD x 2)` = dittoSeq::dittoColors()[[3]])
     ) &
     ggplot2::theme(legend.position = c(0.7, 0.9),
-                   legend.background = element_rect(fill = "white"))
+                   legend.background = ggplot2::element_rect(fill = "white"))
   if (!is.null(n_dims)) {
     plots[["linear_dimensionality_reduction"]][["pca_elbow"]] <-
       plots[["linear_dimensionality_reduction"]][["pca_elbow"]] &
@@ -644,7 +649,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                                          )) +
       ggplot2::theme_void() +
       ggplot2::theme(legend.position = "none",
-                     axis.text.x = element_text(face = "bold", size = 15)) +
+                     axis.text.x = ggplot2::element_text(face = "bold", size = 15)) +
       ditto_colours
 
     # literature markers
@@ -692,7 +697,9 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
         purrr::walk(function(p) {
           section_plots_file <- paste0(out$base, "/", section, "_", p, "_plots.pdf")
           cat("-> Plotting", section, "plot", p, "\n")
+          pdf(section_plots_file)
           print(plots[[section]][[p]])
+          dev.off()
         })
     })
   dev_off_if()
