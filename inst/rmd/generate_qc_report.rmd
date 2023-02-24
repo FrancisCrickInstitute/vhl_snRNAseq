@@ -84,7 +84,7 @@ seu <- seu[sample(nrow(seu), nrow(seu)*0.1),sample(ncol(seu), ncol(seu)*0.1)]
 
 Nuclei per sample
 
-```{r nuclei_per_sample_plot, echo = F}
+```{r nuclei_per_sample_plot, echo = F, message = F, warnings = F}
 p <-
   dplyr::tibble(sample_id = names(table(seu$sample)),
                 n_nuclei = table(seu$sample)) %>%
@@ -96,7 +96,7 @@ p
 
 Summary statistics
 
-```{r summary_statistics_plot, echo = F}
+```{r summary_statistics_plot, echo = F, message = F, warnings = F}
 p <-
   seu@misc$summary_stats %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
@@ -118,7 +118,7 @@ Nucleus-level filtering is performed, applying cut-offs to `nCount_RNA`, `nFeatu
 
 ### Annotate doublets
 
-Putative doublets are identified using the `scDblFinder` package. This package creates artificial doublets by grouping together random pairs of nuclei within each sample to create pseudo-doublets, and then identifying nuclei that cluster near to these pseudo-doublets during dimensionality reduction, which means that they carry a doublet signature. 
+Putative doublets are identified using the `scDblFinder` package. This package creates artificial doublets by grouping together random pairs of nuclei within each sample to create pseudo-doublets, and then identifying nuclei that cluster near to these pseudo-doublets during dimensionality reduction. This co-clustering indicates that they carry a doublet signature. 
 
 The `remove_doublets` argument is set to **`r remove_doublets`**.
 `r if (remove_doublets) {"Doublets will be identified and removed." }`
@@ -155,7 +155,7 @@ p
 
 Proportions of transcript types of interest (mitochondrial, ribosomal, globin) are annotated. Mitochondrial genes are particularly of interest for filtering, but it is good practice to inspect the others as well.
 
-* `percent_mito` - See above.
+* `percent_mito` - A high percentage of mitochondrial genes indicates death, loss of cytoplasmic RNA, or increased apoptosis.
 * `percent_ribo` - mRNA that code for ribosomal proteins. They do not point to specific issues, but it can be good to have a look at their relative abundance. They can have biological relevance.
 * `percent_globin` - Globin genes are very abundant in erythrocytes. Depending on your application, you can expect ‘contamination’ of erythrocytes and select against it.
 
@@ -182,11 +182,11 @@ seu <- get_filters(
 )
 ```
 
-`r paste(names(unlist(seu@misc$filters)) %>% gsub("\\.", " ", .), unlist(seu@misc$filters), collapse = "  \n", sep = " = ")`
+`r paste(paste("*", names(unlist(seu@misc$filters))) %>% gsub("\\.", " ", .), paste0("**", unlist(seu@misc$filters), "**"), collapse = "  \n", sep = " = ")`
 
 #### Plot of filters vs feature distribution
 
-```{r filters_vs_distribution_vln, echo = F}
+```{r filters_vs_distribution_vln, echo = F, message = F, warning = F}
 p <- 
     seu@misc$nucleus_filtering %>%
     tidyr::pivot_longer(names(seu@misc$filters)) %>%
@@ -251,7 +251,7 @@ n_retained <- nrow(dplyr::filter(seu@misc$nucleus_filtering, pass))
 
 Find the most highly variable genes (HVGs) across samples.
 
-```{r hvg, warnings = F}
+```{r hvg, message = F, warning = F}
 seu <- Seurat::FindVariableFeatures(seu)
 ```
 
@@ -285,11 +285,11 @@ p
 
 ## Normalisation and scaling
 
-Running SCTransform() for normalisation and scaling of the data. 
+Seurat::SCTransform() is a function that performs normalisation and scaling of the data. 
 
-Variables to regress out of the SCTransform residuals are `r paste(vars_to_regress, collapse = ", ")` (argument `vars_to_regress`). This prevents these variables from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
+Variables to regress out of the SCTransform residuals  (argument `vars_to_regress`) are **`r paste(vars_to_regress, collapse = " and ")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
 
-```{r sctransform, warning = F}
+```{r sctransform, warning = F, message = F}
 seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
 
 # save seu_transformed
@@ -316,18 +316,22 @@ seu <- Seurat::RunPCA(seu)
 
 ### Dimensionality of the data
 
-The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. This can be manually decided by consulting the elbow plot (see below). 
+The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental as meaningful biological variation may be dropped from downstream analysis. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate.
 
-`r if (is.null(n_dims)) {paste0("Dimensionality of the data is **", n_dims, "** (set by argument n_dims).")}`
-`r if (is.null(n_dims)) {"No value provided for n_dims. Dimensionality will be calculated using the intrinsicDimensions package."}`
+The dimensionality can be decided by consulting the elbow plot and manually picking a value (argument `n_dims`) or it can be calculated using the `intrinsicDimensionality` package. 
+
+#### `r if (!is.null(n_dims)) {"Manually"}`
+
+`r if (!is.null(n_dims)) {paste0("Dimensionality of the data is **", n_dims, "** (set by argument n_dims).")}`
+`r if (is.null(n_dims)) {"No value was provided for n_dims. Dimensionality will be calculated using the intrinsicDimensions package."}`
 
 ```{r usr_n_dims, include = !is.null(n_dims), eval = !is.null(n_dims)}
 final_n_dims <- n_dims
 ```
 
-Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental as meaningful biological variation may be dropped from downstream analysis. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate.
+#### intrinsicDimensionality
 
-The dimensionality of the dataset can be estimated using the intrinsicDimension package. This bypasses the manual approach of reading the elbow plot, but can sometimes be a bit too conservative. Therefore, if `n_dims` is not defined by the user, the dimensionality is set as double the intrinsicDimension estimate. 
+The dimensionality of the dataset can also be estimated using the intrinsicDimension package. This bypasses the manual approach of reading the elbow plot, but can sometimes be a bit too conservative. Therefore, if `n_dims` is not defined by the user, the dimensionality is set as double the intrinsicDimension estimate. 
 
 ```{r iD_n_dims}
 n_dims_iD <- intrinsicDimension::maxLikGlobalDimEst(
