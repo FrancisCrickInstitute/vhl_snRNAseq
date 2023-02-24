@@ -8,7 +8,7 @@
 # -> parse_analysis_subdir = all-well/DGE_{filtered,unfiltered}/
 # -> do_integration = TRUE or FALSE
 
-# set directories, load R
+# set directories, activate conda env
 # base_dir=/Volumes/TracerX/working/VHL_GERMLINE/tidda/ ; wd=$base_dir/vhl/ ; cd $wd
 cd /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/
 . src/config.sh
@@ -17,13 +17,12 @@ cd /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/
 Rscript src/get_runs.R
 
 # run analyse_snRNAseq
-cat out/runs.tsv | sed 1d |
+cat out/runs.tsv | sed 1d | #grep FALSE | grep comb | grep -P '\thg38' | grep DGE_filtered |
 {
   while read path experiment genome sublibrary parse_analysis_subdir do_integration ; do
     . src/submit_analyse_snRNAseq.sh
   done
 }
-
 
 # # run manually:
 # cat out/runs.tsv | sed 1d |

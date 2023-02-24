@@ -8,7 +8,7 @@ cat << EOF > $script
 #!/bin/bash
 #SBATCH --job-name=parse_${run_info}
 #SBATCH --time=1-00:00:0
-#SBATCH --mem=50GB
+#SBATCH --mem=150GB
 #SBATCH -o /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/${run_info}.out
 #SBATCH -e /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/${run_info}.err
 

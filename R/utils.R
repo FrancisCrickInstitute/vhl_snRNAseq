@@ -1,6 +1,12 @@
 # Not %in% function
 `%ni%` <- Negate('%in%')
 
+# Convert all double slashes in path to single
+clean_path <- function(path) {path %>% gsub("//", "/", .)}
+
+# dev.off() if there is a device
+dev_off_if <- function() {if (length(dev.list()) != 0) { dev.off() }}
+
 # Find matches to any of a vector of character strings (for filtering)
 greplany <- function(patterns, v) {
   match <- rep(FALSE, length(v))
@@ -101,38 +107,48 @@ plot_genes_per_nucleus_dist <- function(seu) {
 }
 
 # Plot nucleus scatter with filters
-plot_nucleus_scatter_with_filters <- function(seu, x, y, ...) {
-  #filters <- seu@misc$filters
-  dat <- seu@meta.data %>%
-    tibble::as_tibble(rownames = "nucleus") %>%
-    dplyr::mutate(x_var = get(x), y_var = get(y),
-                  include = x_var >= seu@misc$filters[[x]]$min & x_var <= seu@misc$filters[[x]]$max &
-                    y_var >= seu@misc$filters[[y]]$min & y_var <= seu@misc$filters[[y]]$max,
-                  n_include = sum(include),
-                  n_exclude = dplyr::n() - include,
-                  title = paste0("include=", n_include, ", exclude=", n_exclude))
+plot_nucleus_scatter_with_filters <- function(seu, x, y, log_x = F, log_y = F) {
+  # #filters <- seu@misc$filters
+  # dat <- seu@meta.data %>%
+  #   tibble::as_tibble(rownames = "nucleus") %>%
+  #   dplyr::mutate(x_var = get(x) %>% { if(log_x) log(.) else . },
+  #                 y_var = get(y) %>% { if(log_y) log(.) else . },
+  #                 include = x_var >= seu@misc$filters[[x]]$min & x_var <= seu@misc$filters[[x]]$max &
+  #                   y_var >= seu@misc$filters[[y]]$min & y_var <= seu@misc$filters[[y]]$max,
+  #                 n_include = sum(include),
+  #                 n_exclude = dplyr::n() - include,
+  #                 title = paste0("include=", n_include, ", exclude=", n_exclude))
+  dat <- seu@misc$nucleus_filtering %>%
+    dplyr::mutate(x_var = get(x) %>% { if(log_x) log(.) else . },
+                  y_var = get(y) %>% { if(log_y) log(.) else . },
+                  title = paste0(x, " n fail = ", sum(grepl(x, fail_criteria)), " / ", dplyr::n(), "\n",
+                                 y, " n fail = ", sum(grepl(y, fail_criteria)), " / ", dplyr::n()))
   dat %>%
-    ggplot2::ggplot(ggplot2::aes(x = x_var, y = y_var, colour = include)) +
-    ggplot2::geom_vline(xintercept = unlist(seu@misc$filters[[x]]), colour = "red") +
-    ggplot2::geom_hline(yintercept = unlist(seu@misc$filters[[y]]), colour = "red") +
-    ggplot2::geom_point(size = 0.5) +
+    ggplot2::ggplot(ggplot2::aes(x = x_var, y = y_var, colour = fail_criteria)) +
+    ggplot2::geom_vline(xintercept = unlist(seu@misc$filters[[x]]) %>% { if(log_x) log(.) else . },
+                        colour = "red") +
+    ggplot2::geom_hline(yintercept = unlist(seu@misc$filters[[y]]) %>% { if(log_y) log(.) else . },
+                        colour = "red") +
+    ggplot2::geom_point(size = 0.5, alpha = 0.7) +
+    ggplot2::geom_point(data = . %>% dplyr::filter(pass == F), size = 0.5, alpha = 0.7) +
     ggplot2::labs(title = unique(dat$title),
-                  x = x,
-                  y = y) +
-    ggplot2::scale_colour_manual(values = c("grey", "black")) +
-    ggplot2::theme(legend.position = "none")
+                  x = paste0(ifelse(log_x, "log ", ""), x),
+                  y = paste0(ifelse(log_y, "log ", ""), y)) +
+    ditto_colours
+
 }
 
 # Get filters list object
 get_filters <- function(seu,
                         do_filtering,
                         remove_doublets,
+                        min_nCount_RNA,
                         max_nCount_RNA,
                         min_nFeature_RNA,
                         max_nFeature_RNA,
                         max_percent_mito) {
 
-  # get filters
+  # get filters (user-provided or median + n_mads * MAD)
   if(do_filtering == T) {
     filters <- list(
       "doublet" = list(
@@ -140,16 +156,16 @@ get_filters <- function(seu,
         max = ifelse(remove_doublets == T, 0, 1)
       ),
       "nCount_RNA" = list(
-        min = 0,
-        max = ifelse(!is.null(max_nCount_RNA), max_nCount_RNA, get_max(seu$nCount_RNA))
+        min = ifelse(!is.null(min_nCount_RNA), min_nCount_RNA, 0),
+        max = ifelse(!is.null(max_nCount_RNA), max_nCount_RNA, get_max(seu$nCount_RNA, n_mads = 3))
       ),
       "nFeature_RNA" = list(
         min = ifelse(!is.null(min_nFeature_RNA), min_nFeature_RNA, 100),
-        max = ifelse(!is.null(max_nFeature_RNA), max_nFeature_RNA, get_max(seu$nFeature_RNA))
+        max = ifelse(!is.null(max_nFeature_RNA), max_nFeature_RNA, get_max(seu$nFeature_RNA, n_mads = 3))
       ),
       "percent_mito" = list(
         min = 0,
-        max = ifelse(!is.null(max_percent_mito), max_percent_mito, get_max(seu$percent_mito))
+        max = ifelse(!is.null(max_percent_mito), max_percent_mito, get_max(seu$percent_mito, n_mads = 3))
       )
     )
   } else {
@@ -164,23 +180,25 @@ get_filters <- function(seu,
   # add to seu
   seu@misc$filters <- filters
 
-  # create misc table of included/excluded nuclei, with exclude criteria
+  # message filters
+  names(filters) %>%
+    purrr::walk(function(filter) {
+      cat(filter, "range: min =", filters[[filter]]$min, ", max =", filters[[filter]]$max, "\n")
+    })
+
+  # create misc table of pass/fail nuclei, with fail criteria
   seu@misc$nucleus_filtering <-
-    seu@meta.data %>%
+    seu@meta.data[, colnames(seu@meta.data) %in% c("sample", names(filters))] %>%
     dplyr::as_tibble(rownames = "nucleus") %>%
-    dplyr::select(nucleus, sample, tidyr::any_of(names(filters))) %>%
     tidyr::pivot_longer(-c(nucleus, sample)) %>%
-    dplyr::left_join(filters %>%
-                       purrr::map(dplyr::as_tibble) %>%
-                       dplyr::bind_rows(.id = "name"),
-                     by = "name") %>%
-    dplyr::mutate(include = value >= min & value <= max,
-                  exclude_criteria = ifelse(include == F, name, NA)) %>%
-    dplyr::group_by(nucleus) %>%
-    dplyr::mutate(include_nucleus = all(include),
-                  exclude_criteria_nucleus = exclude_criteria %>% unique %>% na.omit %>%
-                    paste(collapse = ",") %>% dplyr::na_if(., "")
-    )
+    dplyr::rowwise() %>%
+    dplyr::mutate(pass = value >= filters[[name]]$min & value <= filters[[name]]$max,
+                  fail_criteria = ifelse(pass == F, name, NA)) %>%
+    dplyr::group_by(nucleus, sample) %>%
+    dplyr::mutate(pass = all(pass),
+                  fail_criteria = fail_criteria %>% unique %>% na.omit %>% paste(collapse = ",") %>% dplyr::na_if(., "")) %>%
+    tidyr::pivot_wider(id_cols = c("nucleus", "sample", "pass", "fail_criteria")) %>%
+    dplyr::ungroup()
 
   return(seu)
 }

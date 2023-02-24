@@ -52,7 +52,7 @@ load_parse_to_seurat <-
       # add to Seurat object meta.data
       seu@meta.data <-
         dplyr::left_join(seu@meta.data,
-                         sample_metadata %>% dplyr::select(sample_label, dplyr::any_of(groupings)),
+                         sample_metadata %>% dplyr::select(sample, dplyr::any_of(groupings)),
                          by = "sample")
       rownames(seu@meta.data) <- colnames(seu)
 

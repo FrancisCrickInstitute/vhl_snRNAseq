@@ -8,9 +8,10 @@
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
 #' @param min_nuclei_per_gene \emph{Gene filter}. The minimum number of nuclei in which a gene must be present. Genes that are present in very few nuclei are uninformative and unlikely to help in differentiating groups of nuclei. In general, most genes removed by this filtering will be those not detected in any nucleus.
+#' @param min_nCount_RNA \emph{Nucleus filter}. The minimum number of transcripts detected per nucleus.
 #' @param max_nCount_RNA \emph{Nucleus filter}. The maximum number of transcripts detected per nucleus. An unusually high number of RNA molecules suggests that the nucleus is a multiplet.
-#' @param max_nFeature_RNA \emph{Nucleus filter}. The maximum number of genes detected per nucleus. An unusually high number of genes suggests that the nucleus is a multiplet.
 #' @param min_nFeature_RNA \emph{Nucleus filter}. The minimum number of genes detected per nucleus. An unusually low number of genes suggests that the nucleus has a damaged membrane and is therefore low quality.
+#' @param max_nFeature_RNA \emph{Nucleus filter}. The maximum number of genes detected per nucleus. An unusually high number of genes suggests that the nucleus is a multiplet.
 #' @param max_percent_mito \emph{Nucleus filter}. The maximum percentage of mitochondrial transcripts per nucleus. Overrepresentation of mitochondrial transcripts suggests cell death, loss of cytoplasmic RNA, or heightened apoptosis.
 #' @param n_dims Optional. The dimensionality of the dataset to use for downstream analysis. This is the number of principal components believed to capture the majority of true biological signal in the dataset. This can be decided by consulting the elbow plot. If no value given, dimensionality is calculated using the `intrinsicDimensions` package.
 #' @param cluster_resolutions Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.
@@ -31,6 +32,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                              do_filtering = T,
                              remove_doublets = F,
                              min_nuclei_per_gene = 5,
+                             min_nCount_RNA = NULL,
                              max_nCount_RNA = NULL,
                              min_nFeature_RNA = NULL,
                              max_nFeature_RNA = NULL,
@@ -47,16 +49,15 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   # capture arguments
   args <- as.list(environment())
 
-
   # check arguments
   check_analyse_snRNAseq_args(args)
 
-  # for test runs
-  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_unfiltered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
+  # for internal test runs
+  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=F;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101"
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY"
   # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5"
-  # testing: args  # library(devtools);load_all();args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv())
+  # testing: args  # library(devtools);load_all(); args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv())
 
   # gridExtra and clustree must be loaded in the environment (due to package-specific bugs)
   library(clustree)
@@ -71,21 +72,24 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   # define output directory
   out <- {
     # if out_dir not given, use same output structure as in the parse analysis/ directory
-    if(is.null(out_dir)) "out/" %>%
+    if (is.null(out_dir)) "out/" %>%
       paste(experiment, genome, sublibrary, parse_analysis_subdir, sep = "/") %>%
-      { if(do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/")} %>%
-      { if(do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
+      { if (do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/")} %>%
+      { if (do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
     # if out_dir is given, use out_dir
     else out_dir
-  } %>% {
+    # clean path (// -> /)
+  } %>% clean_path() %>% {
     # pre-set file names (TODO: define these once all outputs are finalised)
     purrr::map(list(base = ""), function(x) paste0(., x))
   }
+
   # create the output directory
   cat("Output will be saved to", out$base, "\n")
   dir.create(out$base, showWarnings = F, recursive = T)
+
   # save captured arguments
-  if("args" %in% ls()) { dput(args, paste0(out$base, "/args_for_generate_qc_report.R")) }
+  if ("args" %in% ls()) { dput(args, paste0(out$base, "/args_for_generate_qc_report.R")) }
 
   # sample groupings to check at clustering stage
   groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin",
@@ -95,12 +99,17 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
     # if checking for doublets, add to the groupings
     { if (remove_doublets) c(., "doublet") else . }
 
-  # LOAD DATA ----
-  cat("\n\nLOAD DATA ----\n\n")
-
+  # LOAD DATA AND GENE FILTERING ----
+  cat("\n\nLOAD DATA AND GENE FILTERING ----\n\n")
+  cat("Creating Seurat object and filtering nuclei per gene...\n")
+  cat("Minimum number of nuclei per gene =", min_nuclei_per_gene, "\n")
   # load parse pipeline output to seurat object with no cut-offs, remove sample
   # NAs, add sample_metadata, add summary_stats, optionally subset samples
-  cat("Creating Seurat object and filtering nuclei per gene...\n")
+  # gene-level filtering (min_nuclei_per_gene)
+  # -> genes that are present in very few nuclei of the dataset (<3) are uninformative
+  #    and unlikely to play any part in differentiating groups of nuclei (in general,
+  #    most genes removed by this filtering will be those not detected in any nuclei)
+
   seu <- load_parse_to_seurat(
     parse_dir,
     experiment,
@@ -115,18 +124,14 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
     do_add_sample_metadata = T,
     do_add_summary_stats = T,
     groupings
-  )
+  ) # subset: # seu <- seu[1:1000, 1:1000] ; out$base <- "out/test/" ; dir.create(out$base)
 
   # save seu object
   saveRDS(seu, file = paste0(out$base, "/seu.rds"))
   # read seu object: # seu <- readRDS(paste0(out$base, "/seu.rds"))
 
-  # NUCLEUS AND GENE FILTERING ----
-  cat("\n\nNUCLEUS AND GENE FILTERING ----\n\n")
-  # gene-level (min_nuclei_per_gene)
-  # -> genes that are present in very few nuclei of the dataset (<3) are uninformative
-  #    and unlikely to play any part in differentiating groups of nuclei (in general,
-  #    most genes removed by this filtering will be those not detected in any nuclei)
+  # NUCLEUS FILTERING ----
+  cat("\n\nNUCLEUS FILTERING ----\n\n")
   # nucleus-level (nCount_RNA, nFeature_RNA, percent_mito, doublet)
   # -> unusually high transcript/gene counts indicate multiplets
   # -> unusually low transcript/gene counts indicate barcoding of nuclei with
@@ -139,7 +144,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
 
   # identify doublets (by creating artificial doublets and looking at their clustering)
   # remove_doublets = F
-  if(remove_doublets == T) {
+  if (remove_doublets == T) {
     cat("Annotating suspected doublets...\n")
     seu <- annotate_doublets(seu)
   } else {
@@ -154,10 +159,12 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   # -> nCount/Feature_RNA, percent_mito = median plus 5 x the median absolute deviation
   #    (recommended by https://romanhaa.github.io/projects/scrnaseq_workflow)
   # -> min_nFeature_RNA = defaults recommended by Parse
+  if (do_filtering) { cat("\nGetting nucleus and gene filters...\n") }
   seu <- get_filters(
     seu,
     do_filtering,
     remove_doublets,
+    min_nCount_RNA,
     max_nCount_RNA,
     min_nFeature_RNA,
     max_nFeature_RNA,
@@ -166,7 +173,6 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
 
   # save filters
   seu@misc$nucleus_filtering %>%
-    tidyr::pivot_wider(id_cols = c(nucleus, sample, dplyr::ends_with("_nucleus"))) %>%
     readr::write_tsv(paste0(out$base, "seu_nucleus_filtering.tsv"))
 
   # nuclei per sample
@@ -178,7 +184,6 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
     ggplot2::geom_col() +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
-
   # plot summary stats
   cat("Plotting summary stats...\n")
   plots[["nucleus_and_gene_filtering"]][["run_summary_stats"]] <-
@@ -186,66 +191,69 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
     ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
     ggplot2::geom_col() +
     ggplot2::facet_grid(statistic ~ ., scales = "free") +
-    ggplot2::labs(title = "per-sample summary statistics")
+    ggplot2::labs(title = "per-sample summary statistics") +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 
   # plot filters on distributions
+  cat("Plotting filters onto distributions...\n")
   plots[["nucleus_and_gene_filtering"]][["filters_vln"]] <-
     seu@misc$nucleus_filtering %>%
-    dplyr::group_by(name) %>%
-    dplyr::mutate(name = paste0(name,
-                                "\nmin=", min, ", max=", max %>% {formatC(signif(., digits=5), digits=5, format="fg", flag="#")},
-                                "\nexcluded=", sum(!include), ", included=", sum(include))) %>%
+    tidyr::pivot_longer(names(seu@misc$filters)) %>%
+    dplyr::left_join(seu@misc$filters %>%
+                       purrr::map(~dplyr::as_tibble(.)) %>%
+                       dplyr::bind_rows(.id = "name")) %>%
+    dplyr::group_by(fail_criteria) %>%
     ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
-    ggplot2::geom_jitter(ggplot2::aes(colour = include),
+    ggplot2::geom_jitter(ggplot2::aes(colour = pass),
                          height = 0, alpha = 0.5, size = 0.6) +
     ggplot2::geom_violin(ggplot2::aes(fill = sample), alpha = 0.8,
                          draw_quantiles = 0.5) +
     ggplot2::geom_hline(ggplot2::aes(yintercept = min), colour = "red") +
     ggplot2::geom_hline(ggplot2::aes(yintercept = max), colour = "red") +
     ggplot2::facet_wrap(~ name, scales = "free") +
-    ggplot2::theme(legend.position = "none",
-                   axis.text.x = element_text(angle = 90)) +
+    ggplot2::theme(axis.text.x = element_text(angle = 90)) +
     ditto_colours +
-    ggplot2::scale_colour_manual(values = c("red", "black"))
+    ggplot2::scale_colour_manual(values = c("darkgrey", "black"))
+
+  plots[["nucleus_and_gene_filtering"]][["filters_bar"]] <-
+    seu@misc$nucleus_filtering %>%
+    dplyr::group_by(sample) %>%
+    dplyr::count(fail_criteria) %>%
+    ggplot2::ggplot(ggplot2::aes(x = sample, y = n, fill = fail_criteria)) +
+    ggplot2::geom_col() +
+    ditto_colours
 
   # plot doublets
+  cat("Plotting detected doublets...\n")
   plots[["nucleus_and_gene_filtering"]][["doublets_per_sample"]] <-
     seu@misc$nucleus_filtering %>%
     dplyr::group_by(sample) %>%
-    dplyr::mutate(n_doublets = sum(name == "doublet" & value == 1)) %>%
-    dplyr::group_by(nucleus) %>%
-    dplyr::mutate(doublet = any(name == "doublet" & value == 1)) %>%
-    ggplot2::ggplot(ggplot2::aes(y = value, x = sample, colour = doublet)) +
-    ggplot2::geom_jitter(data = . %>% dplyr::filter(!doublet), height = 0) +
-    ggplot2::geom_jitter(data = . %>% dplyr::filter(doublet), height = 0) +
+    dplyr::mutate(n_doublets = sum(doublet),
+                  is_doublet = doublet == 1) %>%
+    tidyr::pivot_longer(names(seu@misc$filters)) %>%
+    ggplot2::ggplot(ggplot2::aes(y = value, x = sample, colour = is_doublet)) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(!is_doublet), height = 0) +
+    ggplot2::geom_jitter(data = . %>% dplyr::filter(is_doublet), height = 0) +
     ggplot2::labs(title = "detected doublets in each sample (using scDblFinder)") +
     ggplot2::facet_wrap(~ name, scales = "free") +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
-    ditto_colours +
-    seu@misc$nucleus_filtering %>%
-    dplyr::group_by(sample) %>%
-    dplyr::mutate(n_singlets = sum(name == "doublet" & value == 0),
-                  n_doublets = sum(name == "doublet" & value == 1)) %>%
-    dplyr::distinct(sample, n_doublets, n_singlets) %>%
-    tidyr::pivot_longer(-sample) %>%
-    ggplot2::ggplot(ggplot2::aes(x = sample, y = value, fill = name)) +
-    ggplot2::geom_col() +
-    ggplot2::theme(axis.text.x = element_text(angle = 90)) +
     ditto_colours
 
-  # plot transcript type abundances
+  # plot cell scatters
   cat("Plotting abundance of different transcript types...\n")
   plots[["nucleus_and_gene_filtering"]][["filters_scatter"]] <-
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito") +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", log_y = T) +
+    ggplot2::theme(legend.position = "none") +
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA")
 
   # filtering
-  if(do_filtering == T) {
+  if (do_filtering == T) {
 
     # perform nucleus filtering
     cat("Filtering nuclei...\n")
-    cat(dplyr::n_distinct(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus), "/", nrow(seu), "nuclei retained\n")
-    seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, include_nucleus)$nucleus))
+    n_retained <- nrow(dplyr::filter(seu@misc$nucleus_filtering, pass))
+    cat(round((n_retained / ncol(seu)) * 100, 1), "% (", n_retained, "/", ncol(seu), ") of nuclei retained\n")
+    seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
 
     # save
     saveRDS(seu, paste0(out$base, "seu_filtered.rds"))
@@ -277,6 +285,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   )
 
   if (do_integration == T) {
+
     # INTEGRATION ----
     cat("\n\nINTEGRATION ----\n\n")
     cat("Integrating samples...\n")
@@ -307,10 +316,11 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
     saveRDS(seu, paste0(out$base, "seu_integrated.rds"))
 
   } else {
+
     # NORMALISATION AND SCALING (SCTransform) ----
     cat("\n\nNORMALISATION AND SCALING (SCTransform) ----\n\n")
     cat("Running SCTransform() for normalisation and scaling...\n")
-    seu <- Seurat::SCTransform(seu)
+    seu <- Seurat::SCTransform(seu, vars.to.regress = c("percent_mito", "nCount_RNA"))
 
     # save
     saveRDS(seu, file = paste0(out$base, "/seu_transformed.rds"))
@@ -334,7 +344,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   seu <- Seurat::RunPCA(seu)
 
   # choose dimensionality (final_n_dims) of the dataset
-  if(!is.null(n_dims)) {
+  if (!is.null(n_dims)) {
 
     # n_dims passed by the user
     final_n_dims <- n_dims
@@ -358,22 +368,22 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   cat("Plotting elbow plot...\n")
   plots[["linear_dimensionality_reduction"]][["pca_elbow"]] <-
     Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
-    ggplot2::geom_vline(ggplot2::aes(xintercept = final_n_dims), colour = "chosen n dims",
-                        alpha = 0.5)
+    ggplot2::geom_vline(ggplot2::aes(xintercept = final_n_dims, colour = "chosen n dims"),
+                        alpha = 0.5) &
     ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims_iD, colour = "intrisicDimensions"),
                         linetype = "dashed") &
     ggplot2::geom_vline(ggplot2::aes(xintercept = generous_n_dims, colour = "generous (iD x 2)"),
                         linetype = "dashed") &
     ggplot2::scale_colour_manual(
       name = "n_dims cut-off",
-      values = c(final_n_dims = "red",
+      values = c(`chosen n dims` = "red",
                  user_provided = dittoSeq::dittoColors()[[1]],
                  intrisicDimensions = dittoSeq::dittoColors()[[2]],
                  `generous (iD x 2)` = dittoSeq::dittoColors()[[3]])
     ) &
     ggplot2::theme(legend.position = c(0.7, 0.9),
                    legend.background = element_rect(fill = "white"))
-  if(!is.null(n_dims)) {
+  if (!is.null(n_dims)) {
     plots[["linear_dimensionality_reduction"]][["pca_elbow"]] <-
       plots[["linear_dimensionality_reduction"]][["pca_elbow"]] &
       ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims, colour = "user_provided"),
@@ -403,12 +413,15 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 
   # plot projection of different sample features in different reductions
-  plots[["nonlinear_dimensionality_reduction"]][["umap_vs_sample_label"]] <-
-    dittoSeq::dittoDimPlot(seu, "sample_label", reduction.use = "umap", raster = F)
+  plots[["nonlinear_dimensionality_reduction"]][["umap_vs_sample"]] <-
+    dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F)
 
   # split out sample clusters, side-by-side
   plots[["nonlinear_dimensionality_reduction"]][["umap_split_by_patient"]] <-
-    dittoSeq::dittoDimPlot(seu, "sample_label", reduction.use = "umap", split.by = "nih_pid")
+    dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", split.by = "nih_pid")
+
+  # amend groupings
+  groupings <- groupings[groupings %in% colnames(seu@meta.data)]
 
   # plot all reduction / grouping projections, side-by-side with sample annots for comparison
   groupings_vs_reductions <- list()
@@ -474,7 +487,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   })
 
   # choose a resolution
-  if(!is.null(final_clustering_resolution)) { # final_clustering_resolution=0.3
+  if (!is.null(final_clustering_resolution)) {
 
     # define clusters at final resolution
     seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
@@ -515,7 +528,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
           dittoSeq::dittoDimPlot(seu,
                                  paste0(module, "1"),
                                  main = paste0(module, " module (n=", length(gene_modules[[module]]), ")")) +
-          plots[["celltype_annotation"]][["umap_vs_sample_label"]]
+          plots[["celltype_annotation"]][["umap_vs_sample"]]
         # ridgeplot
         plots[["celltype_annotation"]][[paste0(module, "_module_score_vs_lesion_type_ridge")]] <<-
           dittoSeq::dittoRidgePlot(seu, paste0(module, "1"), group.by = "lesion_type")
@@ -578,7 +591,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
         vjust = "inward", hjust = "inward"
       ) +
       ggplot2::labs(title = "majority celldex annotation(s) per cluster") +
-      plots[["celltype_annotation"]][["umap_vs_sample_label"]]
+      plots[["celltype_annotation"]][["umap_vs_sample"]]
 
     # plot cell type composition of samples
     plots[["celltype_annotation"]][["singler_annot_bar"]] <-
@@ -634,6 +647,15 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                      axis.text.x = element_text(face = "bold", size = 15)) +
       ditto_colours
 
+    # literature markers
+    # # checking that all markers have been found
+    # unmatched_markers <- unlist(literature_markers)[
+    #   !(unlist(literature_markers) %in% unique(rownames(seu@assays$RNA)))
+    # ]
+    # if (length(unmatched_markers) > 0) {
+    #   warning("Marker(s) ", paste(unmatched_markers, collapse = ", "), " not found!")
+    # }
+
     # save annotated seu
     saveRDS(seu, file = paste0(out$base, "/seu_annotated.rds"))
 
@@ -659,35 +681,22 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
 
   }
 
-  # literature markers
-  # # checking that all markers have been found
-  # unmatched_markers <- unlist(literature_markers)[
-  #   !(unlist(literature_markers) %in% unique(rownames(seu@assays$RNA)))
-  # ]
-  # if(length(unmatched_markers) > 0) {
-  #   warning("Marker(s) ", paste(unmatched_markers, collapse = ", "), " not found!")
-  # }
-
   # SAVE PLOTS ----
   cat("\n\nSAVE PLOTS ----\n\n")
-  # save plots as pdf and list
-  cat("Saving all plots to", paste0(out$base, "/qc_report_plots.pdf"), "...\n")
-  if (length(dev.list()) != 0) { dev.off() }
+  dev_off_if()
 
   # plot lists of plots
   names(plots) %>%
     purrr::walk(function(section) {
-      section_plots_file <- paste0(out$base, "/", section, "_plots.pdf")
-      cat("Plotting section", section, "plots...\nSaving to\n", section_plots_file, "\n")
-      pdf(section_plots_file)
       names(plots[[section]]) %>%
         purrr::walk(function(p) {
-          cat("Plotting", p, "\n")
+          section_plots_file <- paste0(out$base, "/", section, "_", p, "_plots.pdf")
+          cat("-> Plotting", section, "plot", p, "\n")
           print(plots[[section]][[p]])
         })
-      dev.off()
     })
-  if (length(dev.list()) != 0) { dev.off() }
+  dev_off_if()
+  #cat("\nPlotting section", section, "plots...\nSaving to", section_plots_file, "\n")
   # ggsave(paste0(out$base, "/qc_report_plots.pdf"), plots_grob,
   #        width = 20, height = 20, units = "cm")
   # saveRDS(plots, file = paste0(out$base, "/qc_report_plots.rds"))
@@ -706,9 +715,12 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   )
   ggsave(paste0(out$base, "/groupings_vs_reductions.pdf"), groupings_vs_reductions_grob,
          width = 20, height = 60, units = "cm")
-  if (length(dev.list()) != 0) { dev.off() }
+  dev_off_if()
 
   # plot clustered reductions grob
+  rmd_script <- system.file("rmd", "generate_qc_report.rmd", package = "vhl")
+  # render(input = rmd_script, params = list())
+
   cat(paste0(out$base, "/clustered_reductions.pdf\n"))
   # convert to grob
   clustered_reductions_grob <- marrangeGrob(
@@ -722,7 +734,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   )
   ggsave(paste0(out$base, "/clustered_reductions.pdf"), clustered_reductions_grob,
          width = 20, height = 60, units = "cm")
-  if (length(dev.list()) != 0) { dev.off() }
+  dev_off_if()
 
   cat("\n\nDONE!\n\n")
 

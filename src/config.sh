@@ -1,10 +1,12 @@
 #!/bin/bash
 
-# wk dir
+# directories
 base_dir=/camp/project/tracerX/working/VHL_GERMLINE/tidda/
 wd=$base_dir/vhl/
 cd $wd
 
-# packages
-. ~/.bash_profile
-ml R/4.2.0-foss-2021b
+. ~/.bashrc
+
+# load conda env
+ml purge
+conda activate vhl
