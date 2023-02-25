@@ -711,7 +711,8 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
   # plot groupings vs reductions grob
   cat(paste0(out$base, "/groupings_vs_reductions.pdf\n"))
   # convert to grob
-  groupings_vs_reductions_grob <- marrangeGrob(
+  groupings_vs_reductions_grob <-
+    gridExtra::marrangeGrob(
     grobs = groupings_vs_reductions,
     nrow = length(groupings),
     ncol = length(Seurat::Reductions(seu)),
@@ -730,7 +731,7 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
 
   cat(paste0(out$base, "/clustered_reductions.pdf\n"))
   # convert to grob
-  clustered_reductions_grob <- marrangeGrob(
+  clustered_reductions_grob <- gridExtra::marrangeGrob(
     grobs = clustered_reductions,
     nrow = length(clustering_resolutions),
     ncol = length(Seurat::Reductions(seu)),

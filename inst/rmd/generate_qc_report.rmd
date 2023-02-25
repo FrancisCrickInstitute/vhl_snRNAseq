@@ -12,8 +12,13 @@ fontsize: 11pt
 library(devtools)
 load_all()
 
+# gridExtra and clustree must be loaded in the environment (due to package-specific bugs)
+library(clustree)
+library(gridExtra)
+
 # set wd
-knitr::opts_chunk$set(root.dir = here::here())
+knitr::opts_chunk$set(root.dir = here::here(),
+                      fig.align = "centre")
 
 # get arguments and add to the global environment
 args <- dget(here::here("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R"))
@@ -75,16 +80,16 @@ The minimum number of nuclei per gene is set to **`r min_nuclei_per_gene`**.
 #     groupings
 #   ) 
 # # save seu 
-# saveRDS(seu, file = here::here(out$base, "/seu.rds"))
-seu <- readRDS(here::here(out$base, "/seu.rds"))
-seu <- seu[sample(nrow(seu), nrow(seu)*0.1),sample(ncol(seu), ncol(seu)*0.1)]
+# saveRDS(seu, file = here::here(out$base, "seu.rds"))
+seu <- readRDS(here::here(out$base, "seu.rds"))
+seu <- seu[sample(nrow(seu), nrow(seu)*0.5),sample(ncol(seu), ncol(seu)*0.1)]
 ``` 
 
 ## Sample-level overview
 
 Nuclei per sample
 
-```{r nuclei_per_sample_plot, echo = F, message = F, warnings = F}
+```{r nuclei_per_sample_plot, echo = F, message = F, warning = F}
 p <-
   dplyr::tibble(sample_id = names(table(seu$sample)),
                 n_nuclei = table(seu$sample)) %>%
@@ -94,15 +99,14 @@ p <-
 p
 ```
 
-Summary statistics
+#### Plot of summary statistics by sample
 
-```{r summary_statistics_plot, echo = F, message = F, warnings = F}
+```{r summary_statistics_plot, echo = F, message = F, warning = F, fig.height = 15}
 p <-
   seu@misc$summary_stats %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
   ggplot2::geom_col() +
   ggplot2::facet_grid(statistic ~ ., scales = "free") +
-  ggplot2::labs(title = "per-sample summary statistics") +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 p
 ```
@@ -132,7 +136,7 @@ seu <- annotate_doublets(seu)
 seu$doublet <- 0
 ```
 
-#### `r if (remove_doublets) {"Plot of detected doublets"}`
+#### `r if (remove_doublets) {"Plot of detected doublets in each sample (using scDblFinder)"}`
 
 ```{r detected_doublets_plot, eval = remove_doublets, echo = F}
 p <-
@@ -144,7 +148,6 @@ p <-
     ggplot2::ggplot(ggplot2::aes(y = value, x = sample, colour = is_doublet)) +
     ggplot2::geom_jitter(data = . %>% dplyr::filter(!is_doublet), height = 0) +
     ggplot2::geom_jitter(data = . %>% dplyr::filter(is_doublet), height = 0) +
-    ggplot2::labs(title = "detected doublets in each sample (using scDblFinder)") +
     ggplot2::facet_wrap(~ name, scales = "free") +
     ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
     ditto_colours
@@ -160,7 +163,7 @@ Proportions of transcript types of interest (mitochondrial, ribosomal, globin) a
 * `percent_globin` - Globin genes are very abundant in erythrocytes. Depending on your application, you can expect ‘contamination’ of erythrocytes and select against it.
 
 ```{r annotate_transcript_types}
-  seu <- annotate_proportions_of_transcript_types(seu)
+seu <- annotate_proportions_of_transcript_types(seu)
 ```
 
 ### Define nucleus-level filters
@@ -186,7 +189,7 @@ seu <- get_filters(
 
 #### Plot of filters vs feature distribution
 
-```{r filters_vs_distribution_vln, echo = F, message = F, warning = F}
+```{r filters_vs_distribution_vln, echo = F, message = F, warning = F, fig.height = 10, fig.width = 10}
 p <- 
     seu@misc$nucleus_filtering %>%
     tidyr::pivot_longer(names(seu@misc$filters)) %>%
@@ -222,9 +225,9 @@ p <-
 p
 ```
 
-#### Plot of filters vs nucleus scatter
+#### Plot of filters against distribution of nuclei
 
-```{r nucleus_scatter_with_filters, echo = F}
+```{r nucleus_scatter_with_filters, echo = F, fig.width = 10}
 p <- 
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", log_y = T) +
     ggplot2::theme(legend.position = "none") +
@@ -232,7 +235,7 @@ p <-
 p
 ```
 
-### Apply nucleus-level filters
+### `r if (do_filtering) {"Apply nucleus-level filters"}`
 
 ```{r filter_nuclei, eval = do_filtering, include = do_filtering}
 seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
@@ -287,13 +290,13 @@ p
 
 Seurat::SCTransform() is a function that performs normalisation and scaling of the data. 
 
-Variables to regress out of the SCTransform residuals  (argument `vars_to_regress`) are **`r paste(vars_to_regress, collapse = " and ")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
+Variables to regress out of the SCTransform residuals  (argument `vars_to_regress`) are **`r paste(vars_to_regress, collapse = "** and **")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
 
-```{r sctransform, warning = F, message = F}
+```{r sctransform, results = 'hide', warning = F}
 seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
 
 # save seu_transformed
-saveRDS(seu, file = here::here(out$base, "/seu_transformed.rds"))
+saveRDS(seu, file = here::here(out$base, "seu_transformed.rds"))
 ```
 
 ## Annotate cell cycle phases
@@ -308,28 +311,64 @@ seu <- Seurat::CellCycleScoring(
 )
 ```
 
-## Linear dimensionality reduction (PCA)
+## Dimensionality reduction
+
+Dimensionality reduction is performed to isolated the strongest signals and to remove background noise. 
+
+### Linear dimensionality reduction (PCA)
 
 ```{r run_pca}
 seu <- Seurat::RunPCA(seu)
 ```
 
+#### Plot of PC1 vs PC2, coloured by sample
+
+```{r pc1_vs_pc2, echo = F}
+p <- 
+  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "pca", raster = F)
+p
+```
+
+#### Plot of cells and genes sorted by their PC scores for PC1 and PC2
+
+```{r pca_dim, echo = F}
+p <- 
+  Seurat::DimHeatmap(
+    seu,
+    dims = 1:2,
+    cells = 500,
+    balanced = TRUE,
+    raster = F,
+    fast = F
+  )
+p
+```
+
+#### Plot of top genes associated with PC1 and PC2
+
+```{r top_genes_pc1_pc2, echo = F}
+p <- 
+  Seurat::VizDimLoadings(seu, dims = 1:2, reduction = "pca")
+p
+```
+
 ### Dimensionality of the data
 
-The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental as meaningful biological variation may be dropped from downstream analysis. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate.
+The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental, as meaningful biological variation may be lost. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate it.
 
-The dimensionality can be decided by consulting the elbow plot and manually picking a value (argument `n_dims`) or it can be calculated using the `intrinsicDimensionality` package. 
+The dimensionality can be decided by consulting the elbow plot (see below) and manually picking a value (set by argument `n_dims`) or it can be calculated using the `intrinsicDimensionality` package. 
 
 #### `r if (!is.null(n_dims)) {"Manually"}`
 
 `r if (!is.null(n_dims)) {paste0("Dimensionality of the data is **", n_dims, "** (set by argument n_dims).")}`
-`r if (is.null(n_dims)) {"No value was provided for n_dims. Dimensionality will be calculated using the intrinsicDimensions package."}`
 
 ```{r usr_n_dims, include = !is.null(n_dims), eval = !is.null(n_dims)}
 final_n_dims <- n_dims
 ```
 
 #### intrinsicDimensionality
+
+`r if (is.null(n_dims)) {"No value was provided for n_dims, so dimensionality will be calculated using the intrinsicDimensions package."}`
 
 The dimensionality of the dataset can also be estimated using the intrinsicDimension package. This bypasses the manual approach of reading the elbow plot, but can sometimes be a bit too conservative. Therefore, if `n_dims` is not defined by the user, the dimensionality is set as double the intrinsicDimension estimate. 
 
@@ -339,40 +378,379 @@ n_dims_iD <- intrinsicDimension::maxLikGlobalDimEst(
     k = 10
   )$dim.est %>% round(0)
 generous_n_dims <- round(2 * n_dims_iD, 0)
+```
+
+```{r iD_n_dims_set, include = is.null(n_dims), eval = is.null(n_dims)}
 final_n_dims <- generous_n_dims
 ```
 
 #### Elbow plot
 
 ```{r elbow_plot, echo = F}
- p <-
+p <-
   Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
-  ggplot2::geom_vline(ggplot2::aes(xintercept = final_n_dims, colour = "chosen n dims"),
-                      alpha = 0.5) &
+  ggplot2::geom_vline(
+    ggplot2::aes(xintercept = final_n_dims, 
+                 colour = ifelse(is.null(n_dims), "chosen n_dims", "user-provided n_dims")),
+                 linewidth = 1) &
   ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims_iD, colour = "intrisicDimensions"),
-                      linetype = "dashed") &
+                      linewidth = 1, linetype = "dashed") &
   ggplot2::geom_vline(ggplot2::aes(xintercept = generous_n_dims, colour = "generous (iD x 2)"),
-                      linetype = "dashed") &
+                      linewidth = 1, linetype = "dashed") &
   ggplot2::scale_colour_manual(
     name = "n_dims cut-off",
-    values = c(
-      `chosen n dims` = "red",
-      user_provided = dittoSeq::dittoColors()[[1]],
-      intrisicDimensions = dittoSeq::dittoColors()[[2]],
-      `generous (iD x 2)` = dittoSeq::dittoColors()[[3]]
-    )
-  ) &
+    values = c(`chosen n_dims` = dittoSeq::dittoColors()[[1]],
+               `user-provided n_dims` = dittoSeq::dittoColors()[[1]],
+               intrisicDimensions = dittoSeq::dittoColors()[[2]],
+               `generous (iD x 2)` = dittoSeq::dittoColors()[[3]])) &
   ggplot2::theme(legend.position = c(0.7, 0.9),
                  legend.background = ggplot2::element_rect(fill = "white"))
-if (!is.null(n_dims)) {
-  p <-
-    p &
-    ggplot2::geom_vline(ggplot2::aes(xintercept = n_dims, colour = "user_provided"),
-                        linetype = "dashed")
-}
 p
 ```
 
-## Non-linear dimensionality reduction (UMAP, tSNE)
+Dimensionality set to **`r final_n_dims`**.
 
+### Non-linear dimensionality reduction (UMAP, tSNE)
 
+```{r run_nonlin_dim_red, warning = F, message = F, echo = F}
+seu <- Seurat::RunTSNE(seu)
+seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
+```
+
+#### Plot of UMAP and tSNE, coloured by sample
+
+```{r nonlin_dim_red_plot, echo = F, fig.width = 10}
+p <-
+  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F,
+                         legend.show = F) +
+  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "tsne", raster = F) 
+p
+```
+
+#### Plot of all reductions, coloured by groupings
+
+A plot of all available groupings of the data, projected onto the three dimensionality reductions (PCA, UMAP, and tSNE).
+
+```{r groupings_vs_reductions, echo = F, fig.dim = c(10, 30)}
+# amend groupings
+avail_groupings <- groupings[groupings %in% colnames(seu@meta.data)]
+# plot all groupings vs all reductions
+groupings_vs_reductions <- list()
+purrr::walk(avail_groupings, function(grouping) {
+  purrr::walk(Seurat::Reductions(seu), function(redu) {
+    title <- paste0(redu, "_vs_", grouping)
+    p <- dittoSeq::dittoDimPlot(
+      seu,
+      grouping,
+      reduction.use = redu,
+      size = 0.5,
+      raster = F,
+      show.axes.numbers = F,
+      show.grid.lines = F,
+      main = gsub("_", " ", title)
+    )
+    groupings_vs_reductions[[paste0(grouping, "_legend")]] <<-
+      lemon::g_legend(p)
+    groupings_vs_reductions[[title]] <<-
+      p + ggplot2::theme(legend.position = "none")
+  })
+})
+# create grob layout
+p <-
+  gridExtra::marrangeGrob(
+    grobs = groupings_vs_reductions,
+    nrow = length(groupings),
+    ncol = length(Seurat::Reductions(seu)),
+    layout_matrix = matrix(
+      1:length(groupings_vs_reductions),
+      length(groupings),
+      length(Seurat::Reductions(seu)) + 1,
+      TRUE
+    ),
+    top = NULL
+  )
+p
+```
+
+## Clustering
+
+From [**Clarke et al., 2021**](https://www.nature.com/articles/s41596-021-00534-0)
+
+>  ***Annotating cell states and gradients***
+>  *When analyzing and characterizing novel cell types, it is important to determine whether they represent a stable cell type or contain multiple cell states. The definitions of cell type and state are not yet standardized, but a stable cell type may be expected to have homogeneous gene expression across a cluster and be compact in a 2D projection plot, whereas cell gradients appear as a spread-out string of cells and cell states (e.g., cell cycle state). Expression gradients indicate continuous differences that are present in the cell population, which could represent states like the cell cycle, immune activation63, spatial patterning64 or transient developmental stages. Care must be taken to distinguish biologically meaningful cell states and experimental batch effects, which can manifest in a similar way.*
+
+We perform unsupervised transcriptome similarity-based clustering to identify groups of nuclei with relatively homogeneous transcript profiles (united by a shared celltype / state). Clustering is performed at different resolutions to explore how groupings change across the parameter space. The aim is to find a resolution at which the clusters appear to best reflect true biological subpopulations of the dataset. 
+
+This process is based on the assumption that true discrete clusters of nuclei do exist within the dataset. The preceding nucleus filtering, feature selection, and dimensionality reduction steps were taken to distill only the highest quality features that reflect the underlying structure of the population and to remove noise that distracts from this structure.  
+
+As with the final dimensionality parameter, there is no deterministic way to set the final clustering resolution and no definitive best value. Instead, one must qualitatively assess clustering outputs for the given dataset and pick a 'good' resolution. Typically, a 'good' final resolution is taken as one that groups nuclei into celltypes. However, looking at multiple clustering resolutions of the same dataset can provide multiple true and valuable conclusions about the dataset at multiple levels of functional subspecialisation of cells. 
+
+Setting a **low clustering resolution** will produce fewer clusters, reflect the broadest subdivisions between groups of nuclei (e.g. different tissues / differentiation lineages), and is more robust to noise, but can miss important local structure within the dataset. 
+
+**Higher clustering resolutions** will result in more, increasingly granular clusters and can reveal celltype-level groups. In can also reveal new / rare celltypes that are hidden at lower resolutions. Setting the clustering resolution too high, however, can produce meaningless groups and lead to overfitting. 
+
+### Find neighbours
+
+The first step is to compute the `k.param` nearest neighbours for a given dataset. This step constructs a shared nearest neighbours (SNN) graph from euclidean distances between nuclei in PCA space, and then computes edge weights between each pair of nuclei based on their Jaccard similarity (the shared overlap of their local neighborhoods).
+
+```{r find_neighbours}
+seu <- Seurat::FindNeighbors(seu, dims = 1:final_n_dims)
+```
+
+### Find clusters at different clustering resolutions
+
+Then, groups of nuclei are iteratively grouped together. Clusters are identified by a SNN modularity optimisation-based clustering algorithm. This procedure is repeated for all clustering resolutions to be tested (set by the `clustering_resolutions` argument). 
+
+The clustering resolutions to be tested are **`r paste(clustering_resolutions, sep = ", ")`**.
+
+```{r find_clusters}
+seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = F)
+```
+
+### Evaluate all clustering resolution
+
+#### Plot of all reductions, coloured by clusters
+
+A final clustering resolution can be decided by looking for sensible groupings of nuclei projected onto the dimensionality reduction plots. 
+
+```{r resolutions_vs_reductions, echo = F, fig.dim = c(10, 30)}
+# plot all clustering resolutions vs all reductions
+resolutions_vs_reductions <- list()
+purrr::walk(clustering_resolutions, function(res) {
+  purrr::walk(Seurat::Reductions(seu), function(redu) {
+      title <- paste0(redu, "_by_cluster_res_", res)
+      resolutions_vs_reductions [[title]] <<-
+        dittoSeq::dittoDimPlot(
+          seu,
+          paste0(Seurat::DefaultAssay(seu), "_snn_res.", res),
+          reduction.use = redu,
+          size = 0.5,
+          raster = F,
+          legend.show = F,
+          show.axes.numbers = F,
+          show.grid.lines = F,
+          main = gsub("_", " ", title)
+        )
+    })
+})
+# create grob layout
+p <-
+  gridExtra::marrangeGrob(
+    grobs = resolutions_vs_reductions ,
+    nrow = length(clustering_resolutions),
+    ncol = length(Seurat::Reductions(seu)),
+    layout_matrix = matrix(1:length(resolutions_vs_reductions ),
+                           length(clustering_resolutions),
+                           length(Seurat::Reductions(seu)),
+                           TRUE),
+    top = NULL
+  )
+p
+```
+
+#### Plot of clustering tree
+
+Alternatively, the `clustree` package provides a more intuitive way to visualise clustering behaviour at different resolutions and to devide on a final clustering resolution. It constructs clustering trees that show how samples move and split up as the number of clusters increases. A 'solid' clustering resolution is taken as one in a part of the tree where clusters remain relatively stable and constant for a few resolution. This indicates that the groups are robust and strongly supported by the data, rather than volatile and noisy. 
+
+```{r clustering_tree, echo = F}
+snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
+p <- 
+  clustree::clustree(seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
+                       prefix = snn_res_prefixes)
+p
+```
+
+### Choose a final clustering resolution
+
+`r if (is.null(final_clustering_resolution)) { "A final clustering resolution has not been given. Please run the package again and pass a resolution to the final_clustering_resolution argument to proceed with downstream analysis." }`
+
+```{r exit_if_no_res, include = is.null(final_clustering_resolution), eval = is.null(final_clustering_resolution)}
+# truncate document if no final clustering resolution has been provided
+knitr::knit_exit()
+```
+
+The final clustering resolution has been set to **`r final_clustering_resolution`**.
+
+```{r set_res}
+seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
+
+# save seu_clustered
+saveRDS(seu, here::here(out$base, "seu_clustered.rds"))
+```
+
+#### Plots of clusters per sample and samples per cluster
+
+```{r clusters_per_sample, echo = F}
+p <-
+  dittoSeq::dittoBarPlot(seu,
+                         var = "cluster",
+                         scale = "count",
+                         group.by = "sample",
+                         main = "",
+                         legend.title = "cluster") +
+  ggplot2::theme(legend.position = "left") +
+  dittoSeq::dittoBarPlot(seu,
+                         var = "sample",
+                         scale = "count",
+                         group.by = "cluster",
+                         main = "",
+                         legend.title = "sample") +
+  patchwork::plot_layout(
+    ncol = 2,
+    widths = c(
+      seu$sample %>% unique() %>% length(),
+      seu$cluster %>% unique() %>% length()
+    )
+  )
+p
+```
+
+## Celltype annotation
+
+The conventional approach to celltype annotation for sc/snRNAseq datasets is to inspect known marker genes from each of the celltypes that are expected and likely to be found at the sample site. Known relationships between marker genes and celltypes of interest can be obtained from databases or manually curated from literature. Then, the expression profiles of all markers from all celltypes across all clusters is programmatically or visually inspected and clusters are then labelled according to their marker profile. 
+
+### Automated annotation using database markers
+
+The package `SingleR` returns "the best annotation for each cell in a test dataset, given a labelled reference dataset in the same feature space". Using the human primary cell atlas from `celldex`, we can find the nearest reference celltype to each nucleus in the dataset. This approach is good because it is unbiased and does not require manual assignment, but it is unclear how well snRNAseq output will map onto a scRNAseq atlas. Additionally, the reference dataset from `celldex` is more rigid, cannot be customised to the use case, and does not contain transformed celltypes. 
+```{r singler_annots, message = F, warning = F}
+human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
+seu_singler <- SingleR::SingleR(
+  test = Seurat::GetAssayData(seu, slot = "data"),
+  ref = human_primary_ref,
+  labels = human_primary_ref$label.main
+)
+```
+
+#### Heatmap of celltype annotation scores from SingleR
+
+```{r singler_annots_heatmap, echo = F, fig.width = 10}
+p <-
+  SingleR::plotScoreHeatmap(seu_singler,
+                            annotation_col = data.frame(
+                              patient = seu$nih_pid,
+                              lesion_type = seu$lesion_type
+                            ))
+p
+```
+
+#### Delta distribution of celltype annotations from SingleR
+
+```{r singler_annots_delta, echo = F, warnings = F, message = F}
+p <-
+  SingleR::plotDeltaDistribution(seu_singler)
+p
+```
+
+Some annotations will contain very few nuclei. These are usually not of interest and clutter up plotting, so we remove annotations assigned to < 10 nuclei.
+
+```{r assign_singler_annots}
+seu$singler_annot <- seu_singler %>%
+      dplyr::as_tibble() %>%
+      dplyr::group_by(labels) %>%
+      dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
+      dplyr::pull(singler_annot)
+```
+
+#### Plot of UMAP clusters, coloured by SingleR annotation and labelled by majority SingleR annotation per cluster
+
+```{r umap_vs_singler_annots, echo = F, fig.width = 10, fig.height = 3}
+# add celltype annotation labels for plotting
+seu$singler_annot_label <- seu@meta.data %>%
+  dplyr::group_by(cluster, singler_annot) %>%
+  dplyr::count() %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::mutate(total = sum(n),
+                prop = round(n / sum(n) * 100, 0),
+                label = paste0(singler_annot, " (", prop, "%)")) %>%
+  dplyr::filter(prop == max(prop) & prop > 50 | max(prop) < 50 & rank(-prop) <= 2) %>%
+  dplyr::summarise(label = paste0("cluster ", unique(cluster), " (n = ", unique(total), ")\n", paste(label, collapse = "\n"))) %>%
+  {dplyr::left_join(seu@meta.data[, "cluster", drop = F], multiple = "all", ., by = "cluster")} %>%
+  dplyr::pull(label)
+# plot
+p <-
+  dittoSeq::dittoDimPlot(seu, "singler_annot", size = 0.7) +
+  ggplot2::geom_label(
+    data = seu@meta.data %>%
+      dplyr::right_join(get_centroids(seu, "umap", cluster), by = "cluster") %>%
+      dplyr::distinct(cluster, singler_annot_label, x, y),
+    ggplot2::aes(x, y, label = singler_annot_label),
+    size = 3,
+    fill = 'white',
+    color = 'black',
+    alpha = 0.5,
+    label.size = 0,
+    show.legend = FALSE,
+    fontface = "bold",
+    vjust = "inward",
+    hjust = "inward"
+  ) +
+  ggplot2::theme(legend.position = "left") +
+  dittoSeq::dittoDimPlot(seu, "sample", size = 0.7) 
+p
+```
+
+#### Plot of SingleR annotation composition of samples
+
+```{r singler_annots_bar, echo = F}
+p <-
+  dittoSeq::dittoBarPlot(
+  seu,
+  var = "singler_annot",
+  group.by = "sample",
+  scale = "count",
+  legend.show = F
+  ) +
+  dittoSeq::dittoBarPlot(seu,
+                         var = "singler_annot",
+                         group.by = "cluster",
+                         scale = "count") +
+  patchwork::plot_layout(
+    ncol = 2,
+    widths = c(
+      seu$sample %>% dplyr::n_distinct(),
+      seu$cluster %>% dplyr::n_distinct()
+    )
+  )
+p
+```
+
+#### Alluvial plot of assignment paths of nuclei from samples to clusters to SingleR annotations
+
+```{r singler_annots_alluvial, echo = F, fig.width = 10}
+p <-
+  seu@meta.data %>%
+  dplyr::group_by(sample, cluster, singler_annot) %>%
+  dplyr::count() %>%
+  dplyr::ungroup() %>%
+  ggforce::gather_set_data(1:3) %>%
+  dplyr::mutate(x = dplyr::case_when(x == 1 ~ "sample",
+                                     x == 2 ~ "cluster",
+                                     x == 3 ~ "singler_annotation") %>%
+                  factor(levels = c("sample", "cluster", "singler_annotation"))) %>%
+  ggplot2::ggplot(ggplot2::aes(
+                    x = x,
+                    id = id,
+                    split = y,
+                    value = n
+                  )) +
+  ggforce::geom_parallel_sets(ggplot2::aes(fill = cluster),
+                              axis.width = 0.15,
+                              alpha = 0.75) +
+  ggforce::geom_parallel_sets_axes(fill = "lightgrey",
+                                   axis.width = 0.15) +
+  ggforce::geom_parallel_sets_labels(angle = 0,
+                                     nudge_x = c(
+                                       rep(-0.3, dplyr::n_distinct(seu$sample)),
+                                       rep(0, dplyr::n_distinct(seu$cluster)),
+                                       rep(0.3, dplyr::n_distinct(seu$singler_annot))
+                                     )) +
+  ggplot2::theme_void() +
+  ggplot2::theme(legend.position = "none",
+                 axis.text.x = ggplot2::element_text(face = "bold", size = 15)) +
+  ditto_colours
+p
+```
+
+### Manual annotation using curated literature markers
+
+Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC. 
