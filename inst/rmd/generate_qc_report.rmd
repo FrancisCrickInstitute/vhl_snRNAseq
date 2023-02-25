@@ -1,10 +1,12 @@
 ---
 title: "VHL snRNAseq report"
-output: html_document
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 geometry: margin=1in
 fontfamily: mathpazo
 fontsize: 11pt
+output:
+  html_document:
+    keep_md: true
 ---
 
 ``` {r setup, include = F}
@@ -18,7 +20,8 @@ library(gridExtra)
 
 # set wd
 knitr::opts_chunk$set(root.dir = here::here(),
-                      fig.align = "centre")
+                      fig.align = "center",
+                      fig.path = "figs")
 
 # get arguments and add to the global environment
 args <- dget(here::here("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R"))
@@ -99,9 +102,7 @@ p <-
 p
 ```
 
-#### Plot of summary statistics by sample
-
-```{r summary_statistics_plot, echo = F, message = F, warning = F, fig.height = 15}
+```{r summary_statistics_plot, echo = F, message = F, warning = F, fig.height = 15, fig.cap = "Plot of summary statistics by sample"}
 p <-
   seu@misc$summary_stats %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
@@ -136,9 +137,7 @@ seu <- annotate_doublets(seu)
 seu$doublet <- 0
 ```
 
-#### `r if (remove_doublets) {"Plot of detected doublets in each sample (using scDblFinder)"}`
-
-```{r detected_doublets_plot, eval = remove_doublets, echo = F}
+```{r detected_doublets_plot, eval = remove_doublets, echo = F, fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
 p <-
   seu@meta.data[,c("sample", "doublet")] %>% 
     dplyr::group_by(sample) %>%
@@ -187,9 +186,7 @@ seu <- get_filters(
 
 `r paste(paste("*", names(unlist(seu@misc$filters))) %>% gsub("\\.", " ", .), paste0("**", unlist(seu@misc$filters), "**"), collapse = "  \n", sep = " = ")`
 
-#### Plot of filters vs feature distribution
-
-```{r filters_vs_distribution_vln, echo = F, message = F, warning = F, fig.height = 10, fig.width = 10}
+```{r filters_vs_distribution_vln, echo = F, message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution"}
 p <- 
     seu@misc$nucleus_filtering %>%
     tidyr::pivot_longer(names(seu@misc$filters)) %>%
@@ -212,9 +209,7 @@ p <-
 p
 ```
 
-#### Plot of the proportions of filtered nuclei and their fail criteria for each sample
-
-```{r fail_criteria_proportions, echo = F}
+```{r fail_criteria_proportions, echo = F, fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
 p <- 
      seu@misc$nucleus_filtering %>%
     dplyr::group_by(sample) %>%
@@ -225,9 +220,7 @@ p <-
 p
 ```
 
-#### Plot of filters against distribution of nuclei
-
-```{r nucleus_scatter_with_filters, echo = F, fig.width = 10}
+```{r nucleus_scatter_with_filters, echo = F, fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
 p <- 
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", log_y = T) +
     ggplot2::theme(legend.position = "none") +
@@ -258,9 +251,7 @@ Find the most highly variable genes (HVGs) across samples.
 seu <- Seurat::FindVariableFeatures(seu)
 ```
 
-#### Plot of HVGs
-
-```{r hvg_scatter, echo = F, warning = F, message = F}
+```{r hvg_scatter, echo = F, warning = F, message = F, fig.cap = "Plot of HVGs"}
 p <- 
   Seurat::LabelPoints(
     plot = Seurat::VariableFeaturePlot(seu, raster = F),
@@ -271,9 +262,7 @@ p <-
 p
 ```
 
-#### Heatmap of top 20 HVGs
-
-```{r hvg_heatmap, echo = F}
+```{r hvg_heatmap, echo = F, fig.cap = "Heatmap of top 20 HVGs"}
 p <- 
   dittoSeq::dittoHeatmap(
     seu,
@@ -321,17 +310,13 @@ Dimensionality reduction is performed to isolated the strongest signals and to r
 seu <- Seurat::RunPCA(seu)
 ```
 
-#### Plot of PC1 vs PC2, coloured by sample
-
-```{r pc1_vs_pc2, echo = F}
+```{r pc1_vs_pc2, echo = F, fig.cap = "Plot of PC1 vs PC2, coloured by sample"}
 p <- 
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "pca", raster = F)
 p
 ```
 
-#### Plot of cells and genes sorted by their PC scores for PC1 and PC2
-
-```{r pca_dim, echo = F}
+```{r pca_dim, echo = F, fig.cap = "Plot of cells and genes sorted by their PC scores for PC1 and PC2"}
 p <- 
   Seurat::DimHeatmap(
     seu,
@@ -344,9 +329,7 @@ p <-
 p
 ```
 
-#### Plot of top genes associated with PC1 and PC2
-
-```{r top_genes_pc1_pc2, echo = F}
+```{r top_genes_pc1_pc2, echo = F, fig.cap = "Plot of top genes associated with PC1 and PC2"}
 p <- 
   Seurat::VizDimLoadings(seu, dims = 1:2, reduction = "pca")
 p
@@ -384,9 +367,7 @@ generous_n_dims <- round(2 * n_dims_iD, 0)
 final_n_dims <- generous_n_dims
 ```
 
-#### Elbow plot
-
-```{r elbow_plot, echo = F}
+```{r elbow_plot, echo = F, fig.cap = "Elbow plot"}
 p <-
   Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
   ggplot2::geom_vline(
@@ -417,9 +398,7 @@ seu <- Seurat::RunTSNE(seu)
 seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 ```
 
-#### Plot of UMAP and tSNE, coloured by sample
-
-```{r nonlin_dim_red_plot, echo = F, fig.width = 10}
+```{r nonlin_dim_red_plot, echo = F, fig.width = 10, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
 p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F,
                          legend.show = F) +
@@ -427,11 +406,9 @@ p <-
 p
 ```
 
-#### Plot of all reductions, coloured by groupings
-
 A plot of all available groupings of the data, projected onto the three dimensionality reductions (PCA, UMAP, and tSNE).
 
-```{r groupings_vs_reductions, echo = F, fig.dim = c(10, 30)}
+```{r groupings_vs_reductions, echo = F, fig.dim = c(10, 30), fig.cap = "Plot of all reductions, coloured by groupings"}
 # amend groupings
 avail_groupings <- groupings[groupings %in% colnames(seu@meta.data)]
 # plot all groupings vs all reductions
@@ -509,11 +486,9 @@ seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = 
 
 ### Evaluate all clustering resolution
 
-#### Plot of all reductions, coloured by clusters
-
 A final clustering resolution can be decided by looking for sensible groupings of nuclei projected onto the dimensionality reduction plots. 
 
-```{r resolutions_vs_reductions, echo = F, fig.dim = c(10, 30)}
+```{r resolutions_vs_reductions, echo = F, fig.dim = c(10, 30), fig.cap = "Plot of all reductions, coloured by clusters"}
 # plot all clustering resolutions vs all reductions
 resolutions_vs_reductions <- list()
 purrr::walk(clustering_resolutions, function(res) {
@@ -548,11 +523,11 @@ p <-
 p
 ```
 
-#### Plot of clustering tree
+#### Clustering tree
 
 Alternatively, the `clustree` package provides a more intuitive way to visualise clustering behaviour at different resolutions and to devide on a final clustering resolution. It constructs clustering trees that show how samples move and split up as the number of clusters increases. A 'solid' clustering resolution is taken as one in a part of the tree where clusters remain relatively stable and constant for a few resolution. This indicates that the groups are robust and strongly supported by the data, rather than volatile and noisy. 
 
-```{r clustering_tree, echo = F}
+```{r clustering_tree, echo = F, fig.cap = "Plot of clustering tree"}
 snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
 p <- 
   clustree::clustree(seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
@@ -578,9 +553,7 @@ seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolut
 saveRDS(seu, here::here(out$base, "seu_clustered.rds"))
 ```
 
-#### Plots of clusters per sample and samples per cluster
-
-```{r clusters_per_sample, echo = F}
+```{r clusters_per_sample, echo = F, fig.cap = "Plots of clusters per sample and samples per cluster"}
 p <-
   dittoSeq::dittoBarPlot(seu,
                          var = "cluster",
@@ -621,9 +594,7 @@ seu_singler <- SingleR::SingleR(
 )
 ```
 
-#### Heatmap of celltype annotation scores from SingleR
-
-```{r singler_annots_heatmap, echo = F, fig.width = 10}
+```{r singler_annots_heatmap, echo = F, fig.width = 10, fig.cap = "Heatmap of celltype annotation scores from SingleR"}
 p <-
   SingleR::plotScoreHeatmap(seu_singler,
                             annotation_col = data.frame(
@@ -633,9 +604,7 @@ p <-
 p
 ```
 
-#### Delta distribution of celltype annotations from SingleR
-
-```{r singler_annots_delta, echo = F, warnings = F, message = F}
+```{r singler_annots_delta, echo = F, warnings = F, message = F, fig.cap = "Delta distribution of celltype annotations from SingleR"}
 p <-
   SingleR::plotDeltaDistribution(seu_singler)
 p
@@ -651,9 +620,7 @@ seu$singler_annot <- seu_singler %>%
       dplyr::pull(singler_annot)
 ```
 
-#### Plot of UMAP clusters, coloured by SingleR annotation and labelled by majority SingleR annotation per cluster
-
-```{r umap_vs_singler_annots, echo = F, fig.width = 10, fig.height = 3}
+```{r umap_vs_singler_annots, echo = F, fig.width = 10, fig.height = 5, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by majority SingleR annotation per cluster"}
 # add celltype annotation labels for plotting
 seu$singler_annot_label <- seu@meta.data %>%
   dplyr::group_by(cluster, singler_annot) %>%
@@ -689,21 +656,21 @@ p <-
 p
 ```
 
-#### Plot of SingleR annotation composition of samples
-
-```{r singler_annots_bar, echo = F}
+```{r singler_annots_bar, echo = F, fig.cap = "Plot of SingleR annotation composition of samples"}
 p <-
   dittoSeq::dittoBarPlot(
   seu,
   var = "singler_annot",
   group.by = "sample",
   scale = "count",
+  main = "",
   legend.show = F
   ) +
   dittoSeq::dittoBarPlot(seu,
                          var = "singler_annot",
                          group.by = "cluster",
-                         scale = "count") +
+                         scale = "count",
+                         main = "") +
   patchwork::plot_layout(
     ncol = 2,
     widths = c(
@@ -714,9 +681,7 @@ p <-
 p
 ```
 
-#### Alluvial plot of assignment paths of nuclei from samples to clusters to SingleR annotations
-
-```{r singler_annots_alluvial, echo = F, fig.width = 10}
+```{r singler_annots_alluvial, echo = F, fig.width = 10, fig.cap = "Alluvial plot of assignment paths of nuclei from samples to clusters to SingleR annotations"}
 p <-
   seu@meta.data %>%
   dplyr::group_by(sample, cluster, singler_annot) %>%
@@ -754,3 +719,4 @@ p
 ### Manual annotation using curated literature markers
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC. 
+
