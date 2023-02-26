@@ -10,7 +10,7 @@ output:
 ---
 
 ```{r initialise, include = F}
-# args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R") ; args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/"
+# testing: # args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/args_for_generate_qc_report.R") ; args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/" ; out <- list(base = "out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/")
 
 # load args to global env
 list2env(args, globalenv())
@@ -25,6 +25,7 @@ library(gridExtra)
 
 # set ggplot theme
 ggplot2::theme_set(ggplot2::theme_bw())
+ggplot2::theme_update(legend.text = ggplot2::element_text(size = 7))
 ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()),
                       ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
 
@@ -69,10 +70,9 @@ seu <- load_parse_to_seurat(
     do_add_summary_stats = T,
     groupings
   )
+
 # save seu
 saveRDS(seu, file = paste0(out$base, "/seu.rds"))
-# # subset for test runs
-# seu <- seu[sample(nrow(seu), nrow(seu)*0.5),sample(ncol(seu), ncol(seu)*0.1)]
 ``` 
 
 ## Sample-level overview
@@ -113,10 +113,10 @@ Nucleus-level filtering is performed, applying cut-offs to `nCount_RNA`, `nFeatu
 Putative doublets are identified using the `scDblFinder` package. This package creates artificial doublets by grouping together random pairs of nuclei within each sample to create pseudo-doublets, and then identifying nuclei that cluster near to these pseudo-doublets during dimensionality reduction. This co-clustering indicates that they carry a doublet signature. 
 
 The `remove_doublets` argument is set to **`r remove_doublets`**.
-`r if (remove_doublets) {"Doublets will be identified and removed." }`
-`r if (!remove_doublets) {"A dummy column will be introduced, treating all nuclei as though they are singlets."}`
+`r if (remove_doublets == T) {"Doublets will be identified and removed." }`
+`r if (remove_doublets == F) {"A dummy column will be introduced, treating all nuclei as though they are singlets."}`
 
-```{r identify_doublets, eval = remove_doublets, include = remove_doublets}
+```{r identify_doublets, eval = remove_doublets == T, include = remove_doublets == T}
 seu <- annotate_doublets(seu)
 ```
 
@@ -124,7 +124,7 @@ seu <- annotate_doublets(seu)
 seu$doublet <- 0
 ```
 
-```{r detected_doublets_plot, eval = remove_doublets, echo = F, fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
+```{r detected_doublets_plot, eval = remove_doublets == T, echo = F, fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
 p_dat <- 
   seu@meta.data[,c("sample", "doublet", "nCount_RNA", "nFeature_RNA")] %>% 
   dplyr::group_by(sample) %>%
@@ -174,8 +174,8 @@ seu <- annotate_proportions_of_transcript_types(seu)
 ### Define nucleus-level filters
 
 The `do_filtering` argument is set to **`r do_filtering`**.
-`r if (do_filtering) {"Filters will be applied." }`
-`r if (!do_filtering) {"Dummy filters will be set (min = -Inf, max = Inf) and all nuclei will be retained." }`
+`r if (do_filtering == T) {"Filters will be applied." }`
+`r if (do_filtering == F) {"Dummy filters will be set (min = -Inf, max = Inf) and all nuclei will be retained." }`
 
 ```{r get_filters}
 seu <- get_filters(
@@ -230,10 +230,9 @@ p
 
 ```{r nucleus_scatter_with_filters, echo = F, fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
 p <- 
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", log_y = T) +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours, log_y = T) +
     ggplot2::theme(legend.position = "none") +
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA")
-
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", ditto_colours)
 p
 ```
 
@@ -244,7 +243,7 @@ n_retained <- nrow(dplyr::filter(seu@misc$nucleus_filtering, pass))
 n_total <- nrow(seu@misc$nucleus_filtering)
 ```
 
-```{r filter_nuclei, eval = do_filtering, include = do_filtering}
+```{r filter_nuclei, eval = do_filtering == T, include = do_filtering == T}
 seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
 
 # save seu_filtered
@@ -285,13 +284,46 @@ p
 
 ## Integration (optional)
 
+The `do_integration` argument is set to **`r do_integration`**.
+Samples will **`r if (do_integration == T) {"not"}`** be integrated.
+
+`r if (do_integration) {"The Seurat object is first split into samples. Normalisation and identification of variable features is then undertaken in each sample independently. Integration anchors are found and the samples are re-integrated after correcting for sample-level effects and then scaled."}`
+
+```{r integrate, eval = F, include = F}
+# 1) split samples
+seu_split <- seu %>%
+  Seurat::SplitObject(split.by = integration_col)
+
+# 2) normalise and find variable features within each sample
+seu_split <- seu_split %>%
+  purrr::map(function(samp) {
+    samp %>%
+      Seurat::NormalizeData() %>%
+      Seurat::FindVariableFeatures()
+  })
+
+# 3) find integration anchors
+int_anchors <- seu_split %>%
+  Seurat::FindIntegrationAnchors(anchor.features = Seurat::SelectIntegrationFeatures(seu_split))
+
+# 4) integrate, set "integrated" as default assay
+seu <- Seurat::IntegrateData(anchorset = int_anchors)
+Seurat::DefaultAssay(seu) <- "integrated"
+
+# 5) post-integration scaling
+seu <- Seurat::ScaleData(seu)
+
+# save seu_integrated
+saveRDS(seu, paste0(out$base, "/seu_integrated.rds"))
+```
+
 ## Normalisation and scaling
 
 `Seurat::SCTransform()` performs normalisation and scaling of the data. 
 
 Variables to regress out of the `SCTransform` residuals  (set by argument `vars_to_regress`) **`r paste(vars_to_regress, collapse = "** and **")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
 
-```{r sctransform, results = F, warning = F}
+```{r sctransform, eval = do_integration == F, include = do_integration == F, results = F, warning = F}
 seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
 
 # save seu_transformed
@@ -747,17 +779,41 @@ Literature markers for celltypes of interest in VHL ccRCC tumours were gathered 
 
 #### HIF markers from Lombardi et al., 2022 (PMC9869179)
 
-The Lombardi paper
+The Lombardi paper experimentally validated a list of HIF target genes. HIF activation is a principal ccRCC. 
 
-#### Renal lineage markers from Young et al., 2019 (PMC6104812)
+#### Kidney lineage markers from Young et al., 2019 (PMC6104812)
 
-The Young paper used markers from different renal developmental lineages to do an in-depth search for all resident celltypes. Authors curated markers from the literature for the following celltypes...
+The Young paper used markers from different renal developmental lineages to do a comprehensive search for all resident celltypes. Authors curated markers from the literature for the following celltypes...
 
-**`r paste(paste("*", names(literature_markers)), collapse = "\n")`** 
+**`r paste(paste("*", names(kidney_lineage_markers)), collapse = "\n")`** 
 
-The present dataset will also be probed for evidence of these different celltypes.
+The present dataset will be probed for evidence of these different celltypes.
 
-```{r literature_markers}
+```{r present_kidney_lineage_markers, include = F}
+# subset kidney lineage marker modules to only genes present in the dataset
+klm <- kidney_lineage_markers %>% purrr::map(intersect, rownames(seu))
+klm <- Filter(function(x) length(x) > 0, klm)
+```
 
+```{r plot_kidney_lineage_markers}
+p <- list()
+names(klm) %>%
+  purrr::walk(function(lineage) {
+    p[[lineage]] <<- list()
+    klm[[lineage]] %>%
+      purrr::walk(function(g) {
+        p[[lineage]][[g]] <<-
+          dittoSeq::dittoDimPlot(seu, g, size = 0.5)
+      })
+    # create grob layout
+    p[[lineage]] <<- 
+      gridExtra::marrangeGrob(
+      grobs = p[[lineage]],
+      top = lineage,
+      ncol = 3,
+      nrow = ceiling(length(klm[[lineage]])/3)
+    )
+    p[[lineage]]
+  })
 ```
 

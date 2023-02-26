@@ -104,17 +104,7 @@ plot_genes_per_nucleus_dist <- function(seu) {
 }
 
 # Plot nucleus scatter with filters
-plot_nucleus_scatter_with_filters <- function(seu, x, y, log_x = F, log_y = F) {
-  # #filters <- seu@misc$filters
-  # dat <- seu@meta.data %>%
-  #   tibble::as_tibble(rownames = "nucleus") %>%
-  #   dplyr::mutate(x_var = get(x) %>% { if(log_x) log(.) else . },
-  #                 y_var = get(y) %>% { if(log_y) log(.) else . },
-  #                 include = x_var >= seu@misc$filters[[x]]$min & x_var <= seu@misc$filters[[x]]$max &
-  #                   y_var >= seu@misc$filters[[y]]$min & y_var <= seu@misc$filters[[y]]$max,
-  #                 n_include = sum(include),
-  #                 n_exclude = dplyr::n() - include,
-  #                 title = paste0("include=", n_include, ", exclude=", n_exclude))
+plot_nucleus_scatter_with_filters <- function(seu, x, y, ditto_colours, log_x = F, log_y = F) {
   dat <- seu@misc$nucleus_filtering %>%
     dplyr::mutate(x_var = get(x) %>% { if(log_x) log(.) else . },
                   y_var = get(y) %>% { if(log_y) log(.) else . },

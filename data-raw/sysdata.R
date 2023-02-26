@@ -12,8 +12,7 @@ kidney_lineage_markers <- readr::read_tsv("data/kidney_lineage_markers.tsv") %>%
 
 # list of gene modules
 # markers from Dropbox/Parse_pilot/initial_QC_and_analysis.Rmd (curated by Annika Fendler)
-celltype_markers <- list(hif = readr::read_tsv("data/hif_metagene.txt", col_names = F)$X1,
-                     monocyte = c("CD14", "CST3", "CD68", "CTSS"),
+celltype_markers <- list(monocyte = c("CD14", "CST3", "CD68", "CTSS"),
                      endothelial = c("PECAM1", "CLDN5", "ERG", "CDH5", "CD34"),
                      macrophage = c("AIF1", "CD68", "LST1", "IFITM2", "PADI2", "ITGAM"),
                      dendritic = c("THBD", "CLEC9A", "CLEC4C"),
@@ -24,6 +23,8 @@ celltype_markers <- list(hif = readr::read_tsv("data/hif_metagene.txt", col_name
                      t = c("CD8A", "CD3D", "CD4", "CD3E", "NCAM1", "PTPRC"),
                      nk = c("NCAM1", "NCR1"),
                      pax8 = c("PAX8"))
+
+programme_markers <- list(hif = readr::read_tsv("data/hif_metagene.txt", col_names = F)$X1)
 
 # save to sysdata
 usethis::use_data(transcript_types,

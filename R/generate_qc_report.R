@@ -25,28 +25,29 @@
 #' @return A Seurat object.
 #'
 #' @export
-analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
-                             experiment,
-                             genome = "hg38",
-                             sublibrary = "comb",
-                             parse_analysis_subdir = "all-well/DGE_unfiltered/",
-                             do_filtering = T,
-                             remove_doublets = F,
-                             min_nuclei_per_gene = 5,
-                             min_nCount_RNA = NULL,
-                             max_nCount_RNA = NULL,
-                             min_nFeature_RNA = NULL,
-                             max_nFeature_RNA = NULL,
-                             max_percent_mito = NULL,
-                             vars_to_regress = c("percent_mito", "nCount_RNA"),
-                             n_dims = NULL,
-                             clustering_resolutions = seq(0.1, 0.8, by = 0.1),
-                             final_clustering_resolution = NULL,
-                             out_dir = NULL,
-                             sample_subset = NULL,
-                             do_timestamp = F,
-                             do_integration = F,
-                             integration_col = "sample") {
+generate_qc_report <-
+  function(parse_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
+           experiment,
+           genome = "hg38",
+           sublibrary = "comb",
+           parse_analysis_subdir = "all-well/DGE_unfiltered/",
+           do_filtering = T,
+           remove_doublets = F,
+           min_nuclei_per_gene = 5,
+           min_nCount_RNA = NULL,
+           max_nCount_RNA = NULL,
+           min_nFeature_RNA = NULL,
+           max_nFeature_RNA = NULL,
+           max_percent_mito = NULL,
+           vars_to_regress = c("percent_mito", "nCount_RNA"),
+           n_dims = NULL,
+           clustering_resolutions = seq(0.1, 0.8, by = 0.1),
+           final_clustering_resolution = NULL,
+           out_dir = NULL,
+           sample_subset = NULL,
+           do_timestamp = F,
+           do_integration = F,
+           integration_col = "sample") {
 
   # for internal test runs
   # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=F;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
@@ -92,6 +93,10 @@ analyse_snRNAseq <- function(parse_dir = "/camp/project/tracerX/working/VHL_GERM
                  parse_analysis_subdir,
                  do_integration,
                  do_timestamp)
+  dir.create(out$base, showWarnings = F, recursive = T)
+
+  # save args to output directory
+  dput(args, paste0(out$base, "/args_for_generate_qc_report.R"))
 
   # pass args to rmd
   rmarkdown::render(system.file("rmd", "generate_qc_report.rmd", package = "vhl"),

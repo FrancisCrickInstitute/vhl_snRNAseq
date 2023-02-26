@@ -17,9 +17,9 @@ base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
 # >300 total transcripts
 # >200 & <10000 genes expressed
 # >1000 UMIs
-# <10% mt genes expressed
+# <10% mt genes expressed (-> 8)
 
-library(devtools) ; load_all() ; analyse_snRNAseq(
+library(devtools) ; load_all() ; generate_qc_report(
   parse_dir = paste0(base_dir, "working/VHL_GERMLINE/tidda/parse_pipeline/"),
   experiment = experiment,
   genome = genome,
@@ -35,5 +35,5 @@ library(devtools) ; load_all() ; analyse_snRNAseq(
   max_percent_mito = 8,
   final_clustering_resolution = 0.3,
   do_integration = do_integration,
-  do_timestamp = T)
+  do_timestamp = F)
 
