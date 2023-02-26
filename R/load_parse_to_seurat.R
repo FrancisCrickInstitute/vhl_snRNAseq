@@ -74,7 +74,6 @@ load_parse_to_seurat <-
           statistic %in% c(
             "median_tscp_per_cell",
             "median_genes_per_cell",
-            "tso_fraction_in_read1",
             "fraction_tscp_in_cells"
           )
         )  %>%

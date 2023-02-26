@@ -9,6 +9,7 @@ conda create -n vhl -c conda-forge -c bioconda -c r \
   r-environment \
   r-essentials \
   r-base \
+  r-rmarkdown \
   r-devtools \
   bioconductor-celldex \
   r-clustree \

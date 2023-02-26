@@ -17,6 +17,7 @@ Imports:
     dplyr,
     ggforce,
     ggplot2,
+    ggrepel,
     gridExtra,
     here,
     intrinsicDimension,
@@ -28,6 +29,7 @@ Imports:
     pheatmap,
     purrr,
     readr,
+    rmarkdown,
     scDblFinder,
     Seurat,
     SingleR

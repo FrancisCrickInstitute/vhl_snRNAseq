@@ -65,8 +65,7 @@ annotate_proportions_of_transcript_types <- function(seu) {
 # Annotate doublets using the scDblFinder package
 annotate_doublets <- function(seu) {
   seu_dbl <- scDblFinder::scDblFinder(
-    Seurat::as.SingleCellExperiment(seu), samples = "sample",
-    BPPARAM = BiocParallel::MulticoreParam(3)
+    Seurat::as.SingleCellExperiment(seu), samples = "sample"
   )
   seu$doublet <- as.numeric(seu_dbl$scDblFinder.class == "doublet")
   return(seu)
@@ -132,7 +131,8 @@ plot_nucleus_scatter_with_filters <- function(seu, x, y, log_x = F, log_y = F) {
     ggplot2::labs(title = unique(dat$title),
                   x = paste0(ifelse(log_x, "log ", ""), x),
                   y = paste0(ifelse(log_y, "log ", ""), y)) +
-    ditto_colours
+    ditto_colours +
+    ggplot2::theme(plot.title = ggplot2::element_text(size = 10))
 
 }
 
