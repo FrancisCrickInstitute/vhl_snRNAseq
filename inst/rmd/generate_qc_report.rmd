@@ -10,20 +10,31 @@ output:
     code_folding: show
 ---
 
-```{r local_testing, include = F, eval = T}
-local_testing = T
+```{r load_vhl_package, include = F}
+library(devtools)
+load_all()
+```
+
+```{r testing, include = F, eval = T}
+testing = T
 args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/args_for_generate_qc_report.R") 
-args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/" 
+args$parse_dir <- paste0(get_base_dir(), "/parse_pipeline/") 
 out <- list(base = "out/test/")
 ```
+
+**Run info:**
+
+```{r args, echo = F}
+knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(paste, collapse = ", ") %>% unlist))
+```
+
+Output files will be saved to `r out$base`.
+
+Figures will be saved to `r out$base`qc_report_files/figure-html/.
 
 ```{r initialise, include = F}
 # load args to global env
 list2env(args, globalenv())
-
-# load vhl package
-library(devtools)
-load_all()
 
 # gridExtra and clustree must be loaded in the environment (due to package-specific bugs)
 library(clustree)
@@ -36,21 +47,17 @@ ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors(
                       ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
 
 # set sample groupings to check at the clustering stage
-groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin",
-                 "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size", "fuhrman_grade") %>%
-    # if genome is human, do cell cycle scoring (doesn't work with other genomes)
-    { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
-    # if checking for doublets, add to the groupings
-    { if (remove_doublets) c(., "doublet") else . } %>%
-    # if multiple experiments, add to the groupings
-    { if (length(experiment) > 1) c(., "experiment") else . }
-```
+groupings <- 
+  c("sample", "percent_mito", "percent_ribo", "percent_globin",
+    "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size", "fuhrman_grade") %>%
+  # if genome is human, do cell cycle scoring (doesn't work with other genomes)
+  { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
+  # if checking for doublets, add to the groupings
+  { if (remove_doublets) c(., "doublet") else . } %>%
+  # if multiple experiments, add to the groupings
+  { if (length(experiment) > 1) c(., "experiment") else . }
 
-Output files will be saved to `r out$base`.
-
-Figures will be saved to `r out$base`qc_report_files/figure-html/.
-
-``` {r setup, include = F}
+# chunk setup
 knitr::opts_chunk$set(fig.align = "center",
                       dpi = 300)
 ```
@@ -78,21 +85,21 @@ seu <- load_parse_to_seurat(
     do_add_summary_stats = T,
     groupings
   )
+```
 
+```{r testing_subset, include = testing == T, eval = testing == T}
+seu <- seu[sample(nrow(seu), size = as.integer(0.2*nrow(seu))), 
+           sample(ncol(seu), size = as.integer(0.1*ncol(seu)))]
+```
+
+```{r save_seu, warning = F}
 # save seu
 saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 ``` 
 
-```{r small_test, include = F, eval = "local_testing" %in% ls()}
-seu <- seu[sample(nrow(seu), size = as.integer(0.5*nrow(seu))), 
-           sample(ncol(seu), size = as.integer(0.1*ncol(seu)))]
-```
-
 ## Sample-level overview
 
-Nuclei per sample
-
-```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F}
+```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F, fig.cap = "Plot of nuclei per sample"}
 p <-
   dplyr::tibble(sample_id = names(table(seu$sample)),
                 n_nuclei = table(seu$sample)) %>%
@@ -205,6 +212,11 @@ seu <- get_filters(
   max_nFeature_RNA,
   max_percent_mito
 )
+```
+
+```{r filtering_stats, echo = F, eval = F}
+seu@misc$nucleus_filtering %>%
+  tidyr::separate_longer_delim(fail_criteria, ",")
 ```
 
 `r paste(paste("*", names(unlist(seu@misc$filters))) %>% gsub("\\.", " ", .), paste0("**", unlist(seu@misc$filters), "**"), collapse = "  \n", sep = " = ")`
@@ -458,7 +470,7 @@ seu <- Seurat::RunTSNE(seu)
 seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 ```
 
-```{r samples_vs_reductions, class.source = 'fold-hide', fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
+```{r samples_vs_reductions, class.source = 'fold-hide', fig.dim = get_fig_dims(dplyr::n_distinct(seu$nih_pid), height_to_width_ratio = 1.25), fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
 p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F,
                          legend.show = F) +
@@ -466,7 +478,7 @@ p <-
 p
 ```
 
-```{r umap_split_by_sample, class.source = 'fold-hide', fig.width = 10, fig.height = dplyr::n_distinct(seu$nih_pid) * 1.5, fig.cap = "Plot of UMAP, split by patient"}
+```{r umap_split_by_sample, class.source = 'fold-hide', fig.dim = get_fig_dims(dplyr::n_distinct(seu$nih_pid)), fig.cap = "Plot of UMAP, split by patient"}
 p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F, legend.show = F, split.by = "nih_pid", split.ncol = 3)
 p
@@ -551,6 +563,8 @@ seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = 
 
 ### Evaluate all clustering resolutions
 
+#### Visual inspection
+
 A final clustering resolution can be decided by looking for sensible groupings of nuclei projected onto the dimensionality reduction plots. 
 
 ```{r resolutions_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, length(clustering_resolutions) * 3.75), fig.cap = "Plot of all reductions, coloured by clusters"}
@@ -600,7 +614,7 @@ p <-
 p
 ```
 
-### Choose a final clustering resolution
+### Final clustering resolution
 
 `r if (is.null(final_clustering_resolution)) { "A final clustering resolution has not been given. Please run the package again and pass a resolution to the final_clustering_resolution argument to proceed with downstream analysis." }`
 
@@ -693,6 +707,9 @@ seu$singler_annot <- seu_singler %>%
       dplyr::group_by(labels) %>%
       dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
       dplyr::pull(singler_annot)
+
+# save seu_annotated
+saveRDS(seu, paste0(out$base, "/seu_annotated.rds"))
 ```
 
 ```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 7, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
@@ -801,92 +818,83 @@ p
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
-#### Important celltype markers (curated by Annika Fendler)
-
-Various important stromal celltypes.
-
-```{r avail_ctm, echo = F}
-# subset celltype marker modules to only genes present in the dataset
-ctm <- get_available_markers(seu, celltype_markers)
-```
-
-```{r plot_ct_markers, class.source = 'fold-hide', fig.dim = get_fig_dims(length(unlist(ctm)))}
-p <- 
-  plot_markers_on_umap(seu, ml = ctm)
-p
-```
-
-#### HIF markers from Lombardi et al., 2022 (PMC9869179)
-
-The Lombardi paper experimentally validated a list of HIF target genes. HIF activation is a principal ccRCC characteristic. 
-
-```{r avail_hif, echo = F}
-# subset HIF markers to only genes present in the dataset
-hif <- get_available_markers(seu, hif_metagene)
-```
-
-Each nucleus is scored by the level of combined expression of the HIF metagene profile.
-
-```{r hif_module_score}
-seu <- Seurat::AddModuleScore(seu, hif_metagene, name = "HIF_metagene")
-```
-
-```{r plot_hif_metagene, class.source = 'fold-hide', fig.width = 10}
-p <- 
-  dittoSeq::dittoDimPlot(seu, "HIF_metagene1") +
-  dittoSeq::dittoDimPlot(seu, "sample") +
-  ggplot2::theme(legend.position = "none")
-p
-```
-
-We can also inspect the expression of every constituent gene of the HIF metagene profile in all nuclei. 
-
-```{r plot_hif_markers, class.source = 'fold-hide', fig.dim = get_fig_dims(length(unlist(hif)))}
-p <- 
-  plot_markers_on_umap(seu, ml = hif)
-p
-```
-
-#### Kidney lineage markers from Young et al., 2019 (PMC6104812)
-
-The Young paper used markers from different renal developmental lineages to do a comprehensive search for all resident celltypes. Authors curated markers from the literature for the following celltypes...
-
-`r paste("*", paste0("**", names(kidney_lineage_markers), "**"), collapse = "  \n")`
-
-The present dataset will be probed for evidence of these different celltypes.
-
-```{r avail_kidney_lineage_markers, echo = F}
-# subset kidney lineage marker modules to only genes present in the dataset
-klm <- get_available_markers(seu, kidney_lineage_markers)
-```
-
-```{r plot_kidney_lineage_markers, echo = F, fig.dim = get_fig_dims(length(unlist(klm)))}
-p <- 
-  plot_markers_on_umap(seu, ml = klm)
-p
-```
-
-```{r markers, fig.width = 10, echo = FALSE, message = FALSE, results = "asis"}
-names(markers) %>%
-  purrr::walk(function(study) {
-    info <- stringr::str_split(study, "_")[[1]]
-    if (length(info) == 3) {
-      cat(paste0(" \n###[", info[3], " et al. (", info[2], 
-               ")](https://pubmed.ncbi.nlm.nih.gov/", info[1], ") markers  \n"))
-    } else {
-      cat(paste0(" \n###", info, "\n"))
+```{r, echo = FALSE, results = 'asis'}
+to_knit <- c()
+for(study in names(markers)) {
+  info <- stringr::str_split(study, "_")[[1]]
+      if (length(info) == 3) {
+        heading <- paste0(
+          "#### [", info[3], " et al. (", info[2], ")](https://pubmed.ncbi.nlm.nih.gov/", info[1], ") markers\n")
+      } else {
+        heading <- paste("####", info, "markers\n")
+      }
+  to_knit <- c(to_knit, heading)
+  
+  for(source in names(markers[[study]])) {
+    avail_markers <- get_available_markers(seu, markers[[study]][[source]])
+    subheading <- paste0("**", length(unlist(markers[[study]][[source]])), 
+                         "** markers sourced from **", source, "**.\n",
+                         "**", length(unlist(avail_markers)), "** markers are present in the dataset.\n")
+    to_knit <- c(to_knit, subheading)
+    
+    for(ct in names(avail_markers)) {
+      subsubheading <- paste0("Population: **", ct, "**\n")
+      ct_markers <- avail_markers[[ct]]
+      n_ct_markers <- length(ct_markers)
+      to_knit <- c(to_knit, subsubheading)
+      
+      knit <- knitr::knit_child(text = c(
+        '',
+        '```{r echo = F, fig.dim = get_fig_dims(n_ct_markers, height_to_width_ratio = 0.8)}',
+        'p <- plot_markers_on_umap(seu, ml = ct_markers)',
+        'p',
+        '```',
+        ''
+      ), envir = environment(), quiet = TRUE)
+      to_knit <- c(to_knit, knit)
+    
     }
-    names(markers[[study]]) %>%
-      purrr::walk(function(source) {
-        cat(paste0("  \nMarkers sourced from ", source, ".  \n"))
-        avail_markers <- get_available_markers(seu, markers[[study]][[source]])
-        markers[[study]][[source]]
-        p <-
-          plot_markers_on_umap(seu, ml = avail_markers)
-        p
-        cat("  \n")
-      })
-  })
+  }
+}
+cat(unlist(to_knit), sep = '\n')
 ```
+
+## Run SCEVAN
+
+From [**github.com/AntonioDeFalco/SCEVAN**](https://github.com/AntonioDeFalco/SCEVAN)
+
+>  ***Single CEll Variational Aneuploidy aNalysis (SCEVAN)***
+>  *SCEVAN is an R package that starting from the raw count matrix of scRNA data automatically classifies the cells present in the biopsy by segregating non-malignant cells of tumor microenviroment from the malignant cells and also characterizes the clonal structure of these malignant cells. It identfies cell subpopulations with different copy number architecture and reports the specific and shared alterations of each subpopulation. The aim of the tool is to automate the entire analysis by allowing it to be performed in a very simple and completely unsupervised way.*
+
+```{r scevan_dir, eval = T, include = F}
+scevan_dir <- paste0(out$base, "/SCEVAN/")
+dir.create(scevan_dir, showWarnings = F)
+```
+
+`SCEVAN` output will be saved to `r scevan_dir`.
+
+```{r run_scevan, eval = F}
+# split counts by sample
+seu_counts_by_sample <- Seurat::SplitObject(seu, split.by = integration_col) %>%
+  purrr::map(~ .x@assays$RNA@data)
+
+# run SCEVAN
+results <- SCEVAN::multiSampleComparisonClonalCN(seu_counts_by_sample)
+
+# move output to SCEVAN dir
+file.rename("output/", scevan_dir)
+
+# add SCEVAN results to seu metadata
+seu <- Seurat::AddMetaData(seu, metadata = results)
+
+# save seu_scevan
+saveRDS(seu, file = paste0(out$base, "/seu_scevan.rds"))
+ 
+# ![SCEVAN copy number of each sample!](`r scevan_dir`/all_compareClonalCN.png){width = "1280"}
+# ![SCEVAN tSNE vs CNA!](`r scevan_dir`/tsne_CNA.png){width = "1280"}
+# ![SCEVAN tSNE vs classification!](`r scevan_dir`/tsne_scRNA.png){width = "1280"}
+# ![SCEVAN OncoPrint!](`r scevan_dir`/OncoHeat.png){width = "1280"}
+```
+
 
 

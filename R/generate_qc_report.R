@@ -104,6 +104,6 @@ generate_qc_report <-
                     knit_root_dir = rprojroot::find_rstudio_root_file(),
                     output_dir = out$base,
                     output_file = "qc_report",
-                    params = list(args, out = out))
+                    params = list(args, out = out, testing = F))
 
 }
