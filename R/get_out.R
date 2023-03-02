@@ -9,7 +9,10 @@ get_out <- function(out_dir,
     # if out_dir not given, use same output structure as in the parse analysis/ directory
     if (is.null(out_dir))
       "out/" %>%
-      paste(experiment, genome, sublibrary, parse_analysis_subdir, sep = "/") %>%
+      paste(paste(experiment, collapse = "_x_"),
+            genome,
+            paste(sublibrary, collapse = "_x_"),
+            parse_analysis_subdir, sep = "/") %>%
       { if (do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/") } %>%
       { if (do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
     # if out_dir is given, use out_dir

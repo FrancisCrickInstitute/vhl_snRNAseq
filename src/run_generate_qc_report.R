@@ -17,7 +17,7 @@ base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
 # >300 total transcripts
 # >200 & <10000 genes expressed
 # >1000 UMIs
-# <10% mt genes expressed (-> 8)
+# <10% mt genes expressed
 
 library(devtools) ; load_all() ; generate_qc_report(
   parse_dir = paste0(base_dir, "working/VHL_GERMLINE/tidda/parse_pipeline/"),
@@ -32,8 +32,8 @@ library(devtools) ; load_all() ; generate_qc_report(
   max_nCount_RNA = 10000,
   min_nFeature_RNA = 200,
   max_nFeature_RNA = 10000,
-  max_percent_mito = 8,
+  max_percent_mito = 10,
   final_clustering_resolution = 0.3,
   do_integration = do_integration,
-  do_timestamp = F)
+  do_timestamp = T)
 

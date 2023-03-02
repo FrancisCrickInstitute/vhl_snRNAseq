@@ -27,6 +27,3 @@ conda create -n vhl -c conda-forge -c bioconda -c r \
   bioconductor-scdblfinder \
   r-seurat \
   bioconductor-singler
-
-
-

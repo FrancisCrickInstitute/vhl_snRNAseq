@@ -16,13 +16,16 @@ greplany <- function(patterns, v) {
   return(match)
 }
 
-# Check analyse_snRNAseq args
-check_analyse_snRNAseq_args <- function(args) {
+# Check args
+check_args <- function(args) {
   list2env(args,globalenv())
   dge_dir <- paste(parse_dir, "analysis", experiment, genome, sublibrary, parse_analysis_subdir, sep = "/")
   if(!all(c("DGE.mtx", "all_genes.csv", "cell_metadata.csv") %in% list.files(dge_dir))) {
     stop("Provided directory:\n\n", dge_dir, "\n\ndoes not exist or is not a Parse Biosciences split-pipe analysis directory.",
          " Must contain DGE.mtx, all_genes.csv, and cell_metadata.csv files.")
+  }
+  if(length(experiment) != length(sublibrary)) {
+    stop("Length of the experiment argument does not equal the length of the sublibrary argument!")
   }
 }
 
@@ -209,4 +212,42 @@ boxplot_top_genes <- function(seu, n_genes = 20) {
     ggplot2::ggplot(ggplot2::aes(x = gene, y = perc_total)) +
     ggplot2::geom_boxplot() +
     ggplot2::coord_flip()
+}
+
+# Get available markers (marker_list is a named list of marker modules)
+get_available_markers <- function(seu, marker_list) {
+  ml <- marker_list %>% purrr::map(intersect, rownames(seu))
+  ml <- Filter(function(x) length(x) > 0, ml)
+}
+
+# Plot all markers in the marker list (marker_list is a named list of marker modules)
+plot_markers_on_umap <- function(seu, ml) {
+  # list of plots
+  p <- list()
+  names(ml) %>%
+    purrr::walk(function(lineage) {
+      ml[[lineage]] %>%
+        purrr::walk(function(g) {
+          p[[paste(lineage, g, sep = "_")]] <<-
+            dittoSeq::dittoDimPlot(seu, g, size = 0.5,
+                                   main = paste(lineage, "-", g))
+        })
+    })
+  # create grob layout
+  p <-
+    gridExtra::marrangeGrob(grobs = p,
+                            ncol = 3,
+                            nrow = ceiling(length(p) / 3),
+                            top = NULL)
+  return(p)
+}
+
+# Calculate plot height for grids
+get_fig_dims <- function(n_plots, n_cols = 3, grid_width = 10) {
+  # n rows in the grid 
+  n_rows <- floor((n_plots + n_cols - 1) / n_cols)
+  # get height proportionate to width
+  grid_height <- (grid_width / n_cols) * n_rows
+  # return dims
+  c(grid_width, grid_height)
 }

@@ -9,7 +9,7 @@ generate_qc_report(
   experiment,
   genome = "hg38",
   sublibrary = "comb",
-  parse_analysis_subdir = "all-well/DGE_unfiltered/",
+  parse_analysis_subdir = "all-well/DGE_filtered/",
   do_filtering = T,
   remove_doublets = F,
   min_nuclei_per_gene = 5,
@@ -32,11 +32,11 @@ generate_qc_report(
 \arguments{
 \item{parse_dir}{Path to Parse Biosciences split-pipe directory.}
 
-\item{experiment}{The name of the experiment run via split-pipe.}
+\item{experiment}{The name of the experiment run via split-pipe. If you want to combine multiple runs, pass a vector.}
 
 \item{genome}{The reference genome build used by split-pipe for alignment. Default is "hg38".}
 
-\item{sublibrary}{The sublibrary to analyse. Default is "comb".}
+\item{sublibrary}{The sublibrary to analyse. Default is "comb". If you are combining multiple runs, pass a vector whose order matches that of the vector passed to \code{experiment}.}
 
 \item{parse_analysis_subdir}{Parse Biosciences split-pipe DGE subdirectory. This directory must contain \code{DGE.mtx}, \code{all_genes.csv}, and \code{cell_metadata.csv} files. This will indicate which wells to include and whether to use the \verb{DGE_filtered/} or \verb{DGE_unfiltered/} matrix. Default is "all-well/DGE_filtered/".}
 

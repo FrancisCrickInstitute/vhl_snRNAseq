@@ -7,11 +7,17 @@ fontsize: 11pt
 output:
   html_document:
     keep_md: true
+    code_folding: show
 ---
 
-```{r initialise, include = F}
-# testing: # args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/args_for_generate_qc_report.R") ; args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/" ; out <- list(base = "out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/")
+```{r local_testing, include = F, eval = T}
+local_testing = T
+args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/args_for_generate_qc_report.R") 
+args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/" 
+out <- list(base = "out/test/")
+```
 
+```{r initialise, include = F}
 # load args to global env
 list2env(args, globalenv())
 
@@ -35,7 +41,9 @@ groupings <- c("sample", "percent_mito", "percent_ribo", "percent_globin",
     # if genome is human, do cell cycle scoring (doesn't work with other genomes)
     { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
     # if checking for doublets, add to the groupings
-    { if (remove_doublets) c(., "doublet") else . }
+    { if (remove_doublets) c(., "doublet") else . } %>%
+    # if multiple experiments, add to the groupings
+    { if (length(experiment) > 1) c(., "experiment") else . }
 ```
 
 Output files will be saved to `r out$base`.
@@ -75,11 +83,16 @@ seu <- load_parse_to_seurat(
 saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 ``` 
 
+```{r small_test, include = F, eval = "local_testing" %in% ls()}
+seu <- seu[sample(nrow(seu), size = as.integer(0.5*nrow(seu))), 
+           sample(ncol(seu), size = as.integer(0.1*ncol(seu)))]
+```
+
 ## Sample-level overview
 
 Nuclei per sample
 
-```{r nuclei_per_sample_plot, echo = F, message = F, warning = F}
+```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F}
 p <-
   dplyr::tibble(sample_id = names(table(seu$sample)),
                 n_nuclei = table(seu$sample)) %>%
@@ -89,7 +102,7 @@ p <-
 p
 ```
 
-```{r summary_statistics_plot, echo = F, message = F, warning = F, fig.height = 10, fig.cap = "Plot of summary statistics by sample"}
+```{r summary_statistics_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.cap = "Plot of summary statistics by sample"}
 p <-
   seu@misc$summary_stats %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
@@ -124,7 +137,7 @@ seu <- annotate_doublets(seu)
 seu$doublet <- 0
 ```
 
-```{r detected_doublets_plot, eval = remove_doublets == T, echo = F, fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
+```{r detected_doublets_plot, eval = remove_doublets == T, class.source = 'fold-hide', fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
 p_dat <- 
   seu@meta.data[,c("sample", "doublet", "nCount_RNA", "nFeature_RNA")] %>% 
   dplyr::group_by(sample) %>%
@@ -140,21 +153,25 @@ p <-
     name = "",
     values = c(n_singlets = dittoSeq::dittoColors()[1],
                n_doublets = dittoSeq::dittoColors()[2])) +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90),
+  ggplot2::theme(axis.text = ggplot2::element_text(size = 6),
+                 axis.text.x = ggplot2::element_text(angle = 90),
                  legend.position = "none") +
   p_dat %>%
   tidyr::pivot_longer(c("nCount_RNA", "nFeature_RNA"), values_to = "count") %>%
   ggplot2::ggplot(ggplot2::aes(y = count, x = sample)) +
   ggplot2::geom_jitter(data = . %>% dplyr::filter(!is_doublet), height = 0,
-                       ggplot2::aes(colour = "singlet"), size = 0.7) +
+                       ggplot2::aes(colour = "singlet"), size = 0.3) +
   ggplot2::geom_jitter(data = . %>% dplyr::filter(is_doublet), height = 0,
-                       ggplot2::aes(colour = "doublet"), size = 0.7) +
+                       ggplot2::aes(colour = "doublet"), size = 0.3) +
   ggplot2::facet_wrap(~ name, scales = "free") +
   ggplot2::scale_colour_manual(
     name = "",
     values = c(singlet = dittoSeq::dittoColors()[1],
                doublet = dittoSeq::dittoColors()[2])) +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
+  ggplot2::theme(axis.text = ggplot2::element_text(size = 7),
+                 axis.text.x = ggplot2::element_text(angle = 90),
+                 axis.title.y = ggplot2::element_blank(),
+                 legend.position = "bottom") +
   patchwork::plot_layout(ncol = 2, widths = c(1, 2))
 p
 ```
@@ -192,7 +209,7 @@ seu <- get_filters(
 
 `r paste(paste("*", names(unlist(seu@misc$filters))) %>% gsub("\\.", " ", .), paste0("**", unlist(seu@misc$filters), "**"), collapse = "  \n", sep = " = ")`
 
-```{r filters_vs_distribution_vln, echo = F, message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution"}
+```{r filters_vs_distribution_vln, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution"}
 p <- 
     seu@misc$nucleus_filtering %>%
     tidyr::pivot_longer(names(seu@misc$filters)) %>%
@@ -215,7 +232,7 @@ p <-
 p
 ```
 
-```{r fail_criteria_proportions, echo = F, fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
+```{r fail_criteria_proportions, class.source = 'fold-hide', fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
 p <- 
   seu@misc$nucleus_filtering %>%
   dplyr::group_by(sample) %>%
@@ -224,11 +241,10 @@ p <-
   ggplot2::geom_col() +
   ditto_colours +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
-
 p
 ```
 
-```{r nucleus_scatter_with_filters, echo = F, fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
+```{r nucleus_scatter_with_filters, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
 p <- 
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours, log_y = T) +
     ggplot2::theme(legend.position = "none") +
@@ -260,7 +276,7 @@ Find the most highly variable genes (HVGs) across samples.
 seu <- Seurat::FindVariableFeatures(seu)
 ```
 
-```{r hvg_scatter, echo = F, warning = F, message = F, fig.cap = "Plot of HVGs"}
+```{r hvg_scatter, class.source = 'fold-hide', warning = F, message = F, fig.cap = "Plot of HVGs"}
 p <- 
   Seurat::LabelPoints(
     plot = Seurat::VariableFeaturePlot(seu, raster = F),
@@ -271,7 +287,7 @@ p <-
 p
 ```
 
-```{r hvg_heatmap, echo = F, fig.cap = "Heatmap of top 20 HVGs"}
+```{r hvg_heatmap, class.source = 'fold-hide', fig.cap = "Heatmap of top 20 HVGs"}
 p <- 
   dittoSeq::dittoHeatmap(
     seu,
@@ -285,7 +301,7 @@ p
 ## Integration (optional)
 
 The `do_integration` argument is set to **`r do_integration`**.
-Samples will **`r if (do_integration == T) {"not"}`** be integrated.
+Samples will `r if (do_integration == F) {"**not**"}` be integrated.
 
 `r if (do_integration) {"The Seurat object is first split into samples. Normalisation and identification of variable features is then undertaken in each sample independently. Integration anchors are found and the samples are re-integrated after correcting for sample-level effects and then scaled."}`
 
@@ -321,7 +337,7 @@ saveRDS(seu, paste0(out$base, "/seu_integrated.rds"))
 
 `Seurat::SCTransform()` performs normalisation and scaling of the data. 
 
-Variables to regress out of the `SCTransform` residuals  (set by argument `vars_to_regress`) **`r paste(vars_to_regress, collapse = "** and **")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis due to irrelevant variation.
+Variables to regress out of the `SCTransform` residuals  (set by argument `vars_to_regress`) are **`r paste(vars_to_regress, collapse = "** and **")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis, as they are considered to be a source of irrelevant variation.
 
 ```{r sctransform, eval = do_integration == F, include = do_integration == F, results = F, warning = F}
 seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
@@ -352,13 +368,13 @@ Dimensionality reduction is performed to isolated the strongest signals and to r
 seu <- Seurat::RunPCA(seu)
 ```
 
-```{r pc1_vs_pc2, echo = F, fig.cap = "Plot of PC1 vs PC2, coloured by sample"}
+```{r pc1_vs_pc2, class.source = 'fold-hide', fig.cap = "Plot of PC1 vs PC2, coloured by sample"}
 p <- 
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "pca", raster = F)
 p
 ```
 
-```{r pca_dim, echo = F, fig.cap = "Plot of cells and genes sorted by their PC scores for PC1 and PC2"}
+```{r pca_dim, class.source = 'fold-hide', fig.cap = "Plot of cells and genes sorted by their PC scores for PC1 and PC2"}
 p <- 
   Seurat::DimHeatmap(
     seu,
@@ -371,7 +387,7 @@ p <-
 p
 ```
 
-```{r top_genes_pc1_pc2, echo = F, fig.cap = "Plot of top genes associated with PC1 and PC2"}
+```{r top_genes_pc1_pc2, class.source = 'fold-hide', fig.cap = "Plot of top genes associated with PC1 and PC2"}
 p <- 
   Seurat::VizDimLoadings(seu, dims = 1:2, reduction = "pca")
 p
@@ -411,7 +427,7 @@ final_n_dims <- generous_n_dims
 
 Dimensionality set to **`r final_n_dims`**.
 
-```{r elbow_plot, echo = F, fig.cap = "Elbow plot"}
+```{r elbow_plot, class.source = 'fold-hide', fig.cap = "Elbow plot"}
 p <-
   Seurat::ElbowPlot(seu, ndims = max(50, final_n_dims)) &
   ggplot2::geom_vline(
@@ -435,12 +451,14 @@ p
 
 ### Non-linear dimensionality reduction (UMAP, tSNE)
 
-```{r run_nonlin_dim_red, warning = F, message = F, echo = F}
+Perform non-linear dimensionality reduction of the dataset. 
+
+```{r run_nonlin_dim_red, warning = F, message = F}
 seu <- Seurat::RunTSNE(seu)
 seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 ```
 
-```{r samples_vs_reductions, echo = F, fig.width = 10, fig.height = 6, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
+```{r samples_vs_reductions, class.source = 'fold-hide', fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
 p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F,
                          legend.show = F) +
@@ -448,13 +466,13 @@ p <-
 p
 ```
 
-```{r umap_split_by_sample, echo = F, fig.width = 10, fig.height = 6, fig.cap = "Plot of UMAP, split by sample"}
+```{r umap_split_by_sample, class.source = 'fold-hide', fig.width = 10, fig.height = dplyr::n_distinct(seu$nih_pid) * 1.5, fig.cap = "Plot of UMAP, split by patient"}
 p <-
-  dittoSeq::dittoDimPlot(seu, "nih_pid", reduction.use = "umap", raster = F, legend.show = F, split.by = "sample", split.ncol = 3)
+  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F, legend.show = F, split.by = "nih_pid", split.ncol = 3)
 p
 ```
 
-```{r groupings_vs_reductions, echo = F, fig.dim = c(10, 30), fig.cap = "Plot of all dimensionality reductions, coloured by groupings"}
+```{r groupings_vs_reductions, class.source = 'fold-hide', fig.dim = get_fig_dims(48, n_cols=4), fig.cap = "Plot of all dimensionality reductions, coloured by groupings"}
 # amend groupings
 avail_groupings <- groupings[groupings %in% colnames(seu@meta.data)]
 # plot all groupings vs all reductions
@@ -462,7 +480,8 @@ groupings_vs_reductions <- list()
 purrr::walk(avail_groupings, function(grouping) {
   purrr::walk(Seurat::Reductions(seu), function(redu) {
     title <- paste0(redu, "_vs_", grouping)
-    p <- dittoSeq::dittoDimPlot(
+    p <- 
+      dittoSeq::dittoDimPlot(
       seu,
       grouping,
       reduction.use = redu,
@@ -530,11 +549,11 @@ The clustering resolutions to be tested are **`r paste(clustering_resolutions, s
 seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = F)
 ```
 
-### Evaluate all clustering resolution
+### Evaluate all clustering resolutions
 
 A final clustering resolution can be decided by looking for sensible groupings of nuclei projected onto the dimensionality reduction plots. 
 
-```{r resolutions_vs_reductions, echo = F, fig.dim = c(10, 30), fig.cap = "Plot of all reductions, coloured by clusters"}
+```{r resolutions_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, length(clustering_resolutions) * 3.75), fig.cap = "Plot of all reductions, coloured by clusters"}
 # plot all clustering resolutions vs all reductions
 resolutions_vs_reductions <- list()
 purrr::walk(clustering_resolutions, function(res) {
@@ -573,7 +592,7 @@ p
 
 Alternatively, the `clustree` package provides a more intuitive way to visualise clustering behaviour at different resolutions and to devide on a final clustering resolution. It constructs clustering trees that show how samples move and split up as the number of clusters increases. A 'solid' clustering resolution is taken as one in a part of the tree where clusters remain relatively stable and constant for a few resolution. This indicates that the groups are robust and strongly supported by the data, rather than volatile and noisy. 
 
-```{r clustering_tree, echo = F, fig.cap = "Plot of clustering tree"}
+```{r clustering_tree, class.source = 'fold-hide', fig.cap = "Plot of clustering tree"}
 snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
 p <- 
   clustree::clustree(seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
@@ -600,7 +619,7 @@ seu$cluster <- factor(seu$cluster, levels = paste(sort(as.integer(levels(seu$clu
 saveRDS(seu, paste0(out$base, "/seu_clustered.rds"))
 ```
 
-```{r clusters_per_sample, echo = F, fig.cap = "Plots of clusters per sample and samples per cluster"}
+```{r clusters_per_sample, class.source = 'fold-hide', fig.cap = "Plots of clusters per sample and samples per cluster"}
 p <-
   dittoSeq::dittoBarPlot(seu,
                          var = "cluster",
@@ -608,17 +627,22 @@ p <-
                          group.by = "sample",
                          main = "",
                          legend.title = "cluster") +
-  ggplot2::theme(legend.position = "left",
-                 axis.text.x = ggplot2::element_text(angle = 90),
+  ggplot2::theme(legend.position = "bottom",
+                 legend.title = ggplot2::element_blank(),
+                 axis.text.x = ggplot2::element_text(angle = 90, size = 5),
                  legend.text = ggplot2::element_text(size = 5)) +
+  ggplot2::guides(color = guide_legend(override.aes = list(size = 0.5))) +
   dittoSeq::dittoBarPlot(seu,
                          var = "sample",
                          scale = "count",
                          group.by = "cluster",
                          main = "",
                          legend.title = "sample") +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90),
+  ggplot2::theme(legend.position = "bottom",
+                 legend.title = ggplot2::element_blank(),
+                 axis.text.x = ggplot2::element_text(angle = 90, size = 5),
                  legend.text = ggplot2::element_text(size = 5)) +
+  ggplot2::guides(color = guide_legend(override.aes = list(size = 0.5))) +
   patchwork::plot_layout(
     ncol = 2,
     widths = c(
@@ -633,7 +657,7 @@ p
 
 The conventional approach to celltype annotation for sc/snRNAseq datasets is to inspect known marker genes from each of the celltypes that are expected and likely to be found at the sample site. Known relationships between marker genes and celltypes of interest can be obtained from databases or manually curated from literature. Then, the expression profiles of all markers from all celltypes across all clusters is programmatically or visually inspected and clusters are labelled according to their marker profile. 
 
-### Automated annotation using database markers
+### Automated celltype annotation using database markers
 
 The package `SingleR` returns "the best annotation for each cell in a test dataset, given a labelled reference dataset in the same feature space". Using the human primary cell atlas from `celldex`, we can find the nearest reference celltype to each nucleus in the dataset. This approach is good because it is unbiased and does not require manual assignment, but it is unclear how well snRNAseq output will map onto a scRNAseq atlas. Additionally, the reference dataset from `celldex` is more rigid, cannot be customised to the use case, and does not contain transformed celltypes. 
 ```{r singler_annots, message = F, warning = F}
@@ -645,7 +669,7 @@ seu_singler <- SingleR::SingleR(
 )
 ```
 
-```{r singler_annots_heatmap, echo = F, fig.width = 10, fig.cap = "Heatmap of celltype annotation scores from SingleR"}
+```{r singler_annots_heatmap, class.source = 'fold-hide', fig.width = 10, fig.cap = "Heatmap of celltype annotation scores from SingleR"}
 p <-
   SingleR::plotScoreHeatmap(seu_singler,
                             annotation_col = data.frame(
@@ -655,7 +679,7 @@ p <-
 p
 ```
 
-```{r singler_annots_delta, echo = F, results = F, warning = F, message = F, fig.cap = "Delta distribution of celltype annotations from SingleR"}
+```{r singler_annots_delta, class.source = 'fold-hide', results = F, warning = F, message = F, fig.cap = "Delta distribution of celltype annotations from SingleR"}
 p <-
   SingleR::plotDeltaDistribution(seu_singler)
 p
@@ -671,7 +695,7 @@ seu$singler_annot <- seu_singler %>%
       dplyr::pull(singler_annot)
 ```
 
-```{r umap_vs_singler_annots, echo = F, results = F, fig.width = 10, fig.height = 6, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
+```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 7, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
 # add celltype annotation labels for plotting
 seu$singler_annot_label <- seu@meta.data %>%
   dplyr::group_by(cluster, singler_annot) %>%
@@ -709,7 +733,7 @@ p <-
 p
 ```
 
-```{r singler_annots_bar, echo = F, fig.cap = "Plot of SingleR annotation composition of samples"}
+```{r singler_annots_bar, class.source = 'fold-hide', fig.cap = "Plot of SingleR annotation composition of samples"}
 p <-
   dittoSeq::dittoBarPlot(
   seu,
@@ -719,14 +743,14 @@ p <-
   main = "",
   legend.show = F
   ) +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90),
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, size = 5),
                  legend.text = ggplot2::element_text(size = 5)) +
   dittoSeq::dittoBarPlot(seu,
                          var = "singler_annot",
                          group.by = "cluster",
                          scale = "count",
                          main = "") +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90),
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, size = 5),
                  legend.text = ggplot2::element_text(size = 5)) +
   patchwork::plot_layout(
     ncol = 2,
@@ -738,7 +762,7 @@ p <-
 p
 ```
 
-```{r singler_annots_alluvial, echo = F, fig.width = 10, fig.cap = "Alluvial plot of assignment paths of nuclei from samples to clusters to SingleR annotations, coloured by cluster"}
+```{r singler_annots_alluvial, class.source = 'fold-hide', fig.width = 10, fig.cap = "Alluvial plot of assignment paths of nuclei from samples to clusters to SingleR annotations, coloured by cluster"}
 p <-
   seu@meta.data %>%
   dplyr::group_by(sample, cluster, singler_annot) %>%
@@ -773,47 +797,96 @@ p <-
 p
 ```
 
-### Manual annotation using curated literature markers
+### Manual celltype annotation using curated literature markers
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
+#### Important celltype markers (curated by Annika Fendler)
+
+Various important stromal celltypes.
+
+```{r avail_ctm, echo = F}
+# subset celltype marker modules to only genes present in the dataset
+ctm <- get_available_markers(seu, celltype_markers)
+```
+
+```{r plot_ct_markers, class.source = 'fold-hide', fig.dim = get_fig_dims(length(unlist(ctm)))}
+p <- 
+  plot_markers_on_umap(seu, ml = ctm)
+p
+```
+
 #### HIF markers from Lombardi et al., 2022 (PMC9869179)
 
-The Lombardi paper experimentally validated a list of HIF target genes. HIF activation is a principal ccRCC. 
+The Lombardi paper experimentally validated a list of HIF target genes. HIF activation is a principal ccRCC characteristic. 
+
+```{r avail_hif, echo = F}
+# subset HIF markers to only genes present in the dataset
+hif <- get_available_markers(seu, hif_metagene)
+```
+
+Each nucleus is scored by the level of combined expression of the HIF metagene profile.
+
+```{r hif_module_score}
+seu <- Seurat::AddModuleScore(seu, hif_metagene, name = "HIF_metagene")
+```
+
+```{r plot_hif_metagene, class.source = 'fold-hide', fig.width = 10}
+p <- 
+  dittoSeq::dittoDimPlot(seu, "HIF_metagene1") +
+  dittoSeq::dittoDimPlot(seu, "sample") +
+  ggplot2::theme(legend.position = "none")
+p
+```
+
+We can also inspect the expression of every constituent gene of the HIF metagene profile in all nuclei. 
+
+```{r plot_hif_markers, class.source = 'fold-hide', fig.dim = get_fig_dims(length(unlist(hif)))}
+p <- 
+  plot_markers_on_umap(seu, ml = hif)
+p
+```
 
 #### Kidney lineage markers from Young et al., 2019 (PMC6104812)
 
 The Young paper used markers from different renal developmental lineages to do a comprehensive search for all resident celltypes. Authors curated markers from the literature for the following celltypes...
 
-**`r paste(paste("*", names(kidney_lineage_markers)), collapse = "\n")`** 
+`r paste("*", paste0("**", names(kidney_lineage_markers), "**"), collapse = "  \n")`
 
 The present dataset will be probed for evidence of these different celltypes.
 
-```{r present_kidney_lineage_markers, include = F}
+```{r avail_kidney_lineage_markers, echo = F}
 # subset kidney lineage marker modules to only genes present in the dataset
-klm <- kidney_lineage_markers %>% purrr::map(intersect, rownames(seu))
-klm <- Filter(function(x) length(x) > 0, klm)
+klm <- get_available_markers(seu, kidney_lineage_markers)
 ```
 
-```{r plot_kidney_lineage_markers}
-p <- list()
-names(klm) %>%
-  purrr::walk(function(lineage) {
-    p[[lineage]] <<- list()
-    klm[[lineage]] %>%
-      purrr::walk(function(g) {
-        p[[lineage]][[g]] <<-
-          dittoSeq::dittoDimPlot(seu, g, size = 0.5)
+```{r plot_kidney_lineage_markers, echo = F, fig.dim = get_fig_dims(length(unlist(klm)))}
+p <- 
+  plot_markers_on_umap(seu, ml = klm)
+p
+```
+
+```{r markers, fig.width = 10, echo = FALSE, message = FALSE, results = "asis"}
+names(markers) %>%
+  purrr::walk(function(study) {
+    info <- stringr::str_split(study, "_")[[1]]
+    if (length(info) == 3) {
+      cat(paste0(" \n###[", info[3], " et al. (", info[2], 
+               ")](https://pubmed.ncbi.nlm.nih.gov/", info[1], ") markers  \n"))
+    } else {
+      cat(paste0(" \n###", info, "\n"))
+    }
+    names(markers[[study]]) %>%
+      purrr::walk(function(source) {
+        cat(paste0("  \nMarkers sourced from ", source, ".  \n"))
+        avail_markers <- get_available_markers(seu, markers[[study]][[source]])
+        markers[[study]][[source]]
+        p <-
+          plot_markers_on_umap(seu, ml = avail_markers)
+        p
+        cat("  \n")
       })
-    # create grob layout
-    p[[lineage]] <<- 
-      gridExtra::marrangeGrob(
-      grobs = p[[lineage]],
-      top = lineage,
-      ncol = 3,
-      nrow = ceiling(length(klm[[lineage]])/3)
-    )
-    p[[lineage]]
   })
 ```
+
 

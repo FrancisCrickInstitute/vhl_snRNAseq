@@ -17,7 +17,8 @@ cd /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/
 Rscript src/get_runs.R
 
 # run analyse_snRNAseq
-cat out/runs.tsv | sed 1d | # grep FALSE | grep 230210 | grep comb | grep -P '\thg38\t' | grep DGE_filtered |
+cat out/runs.tsv | sed 1d | grep FALSE | grep -P '230210|221202' |
+grep -P 'comb|SHE5052A9_S101' | grep -P '\thg38\t' | grep DGE_filtered |
 {
   while read path experiment genome sublibrary parse_analysis_subdir do_integration ; do
     . src/submit_generate_qc_report.sh

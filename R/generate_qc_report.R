@@ -1,9 +1,9 @@
 #' analyse snRNAseq output from Parse Biosciences split-pipe
 #'
 #' @param parse_dir Path to Parse Biosciences split-pipe directory.
-#' @param experiment The name of the experiment run via split-pipe.
+#' @param experiment The name of the experiment run via split-pipe. If you want to combine multiple runs, pass a vector.
 #' @param genome The reference genome build used by split-pipe for alignment. Default is "hg38".
-#' @param sublibrary The sublibrary to analyse. Default is "comb".
+#' @param sublibrary The sublibrary to analyse. Default is "comb". If you are combining multiple runs, pass a vector whose order matches that of the vector passed to `experiment`.
 #' @param parse_analysis_subdir Parse Biosciences split-pipe DGE subdirectory. This directory must contain `DGE.mtx`, `all_genes.csv`, and `cell_metadata.csv` files. This will indicate which wells to include and whether to use the `DGE_filtered/` or `DGE_unfiltered/` matrix. Default is "all-well/DGE_filtered/".
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
@@ -30,7 +30,7 @@ generate_qc_report <-
            experiment,
            genome = "hg38",
            sublibrary = "comb",
-           parse_analysis_subdir = "all-well/DGE_unfiltered/",
+           parse_analysis_subdir = "all-well/DGE_filtered/",
            do_filtering = T,
            remove_doublets = F,
            min_nuclei_per_gene = 5,
@@ -51,10 +51,11 @@ generate_qc_report <-
 
   # for internal test runs
   # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=F;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
-  # testing: Wu filters # remove_doublets=T;min_nuclei_per_gene = 5;min_nCount_RNA = 300;max_nCount_RNA = 10000;min_nFeature_RNA = 200;max_nFeature_RNA = 10000;max_percent_mito = 8
+  # testing: Wu filters # remove_doublets=T;min_nuclei_per_gene = 5;min_nCount_RNA = 300;max_nCount_RNA = 10000;min_nFeature_RNA = 200;max_nFeature_RNA = 10000;max_percent_mito = 10
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101"
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY";sublibrary="comb"
   # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5";sublibrary="comb"
+  # testing: 8 SLs + pilot # experiment=c("221202_A01366_0326_AHHTTWDMXY","230210_A01366_0351_AHNHCFDSX5");sublibrary=c("SHE5052A9_S101","comb")
   # testing: args  # library(devtools);load_all(); args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv())
   # testing: args  # args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R") ; args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/"
 
@@ -83,7 +84,7 @@ generate_qc_report <-
                integration_col = integration_col)
 
   # check arguments
-  check_analyse_snRNAseq_args(args)
+  check_args(args)
 
   # define output directory
   out <- get_out(out_dir,
