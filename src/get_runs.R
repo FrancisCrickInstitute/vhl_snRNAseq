@@ -13,7 +13,7 @@ runs <- paste(
   # convert vectorised bash output to tibble
   { dplyr::tibble(path = .) } %>%
   # convert nested subdirs to variables
-  # (each level corresponds to a parameters of the split-pipe run)
+  # (each level corresponds to a parameter of the split-pipe run)
   tidyr::separate(
     path,
     into = c("experiment", "genome", "sublibrary", "parse_analysis_subdir"),
@@ -22,33 +22,30 @@ runs <- paste(
     extra = "merge"
   ) %>%
   # add in integration option T/F
-  dplyr::cross_join(dplyr::tibble(do_integration = c(T, F)))
+  dplyr::cross_join(dplyr::tibble(do_integration = c(T, F))) %>%
+  # if exists, get comb only, else get all SLs
+  dplyr::group_by(experiment) %>%
+  dplyr::filter(any(sublibrary == "comb") & sublibrary == "comb" |
+                  !any(sublibrary == "comb")) %>%
+  dplyr::ungroup()
+
+# sample metadata
+final_samples <-
+  readr::read_tsv(paste0(parse_pipeline_dir,
+                         "/expdata/230210_A01366_0351_AHNHCFDSX5/sample_metadata.tsv"))$sample
+
+# add 8 SLs + 2 SLs runs (all data combined) (vectorised arguments are separated by a ',')
+runs <-
+  dplyr::bind_rows(
+    runs,
+    runs %>%
+      dplyr::filter(
+        grepl("230210|221202", experiment),
+        genome == "hg38") %>%
+      dplyr::group_by(genome, do_integration, parse_analysis_subdir) %>%
+      dplyr::summarise(dplyr::across(everything(), ~ paste(.x, collapse = ","))) %>%
+      dplyr::mutate(sample_subset = paste(final_samples, collapse = ","))
+    )
 
 # write to out/
 readr::write_tsv(runs, "out/runs.tsv")
-
-
-# # run in a loop:
-# library(devtools) ; load_all()
-# base_dir <- get_base_dir()
-# wkdir <- paste0(base_dir, "/vhl/")
-# parse_pipeline_dir <- paste0(base_dir, "parse_pipeline")
-# setwd(wkdir)
-# runs <- readr::read_tsv("out/runs.tsv") %>%
-#   dplyr::filter(genome=="hg38", do_integration==F)
-# for(i in 1:nrow(runs)) {
-#   run = dplyr::filter(runs, dplyr::row_number() == nrow(runs) + 1 - i)
-#   cat(run$experiment, run$genome, run$sublibrary, run$parse_analysis_subdir, "\n")
-#   generate_QC_report(
-#     experiment = run$experiment,
-#     parse_pipeline_dir = paste0(base_dir, "/parse_pipeline/"),
-#     genome = run$genome,
-#     sublibrary = run$sublibrary,
-#     parse_analysis_subdir = run$parse_analysis_subdir,
-#     n_dims = 20,
-#     out_dir = NULL,
-#     sample_subset = NULL,
-#     do_timestamp = F,
-#     do_integration = run$do_integration)
-# }
-

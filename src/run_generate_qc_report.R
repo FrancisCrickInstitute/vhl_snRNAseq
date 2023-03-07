@@ -1,9 +1,17 @@
 args <- commandArgs(trailingOnly=TRUE)
-experiment <- args[1]
+experiment <- strsplit(args[1], ",")[[1]]
 genome <- args[2]
-sublibrary <- args[3]
+sublibrary <- strsplit(args[3], ",")[[1]]
 parse_analysis_subdir <- args[4]
 do_integration <- args[5]
+sample_subset <- args[6]
+
+# set sample subset arg
+if (sample_subset == "NA") {
+  sample_subset <- NULL
+} else {
+  sample_subset <- strsplit(sample_subset, ",")[[1]]
+}
 
 base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
                    "/Volumes/TracerX/",
@@ -14,7 +22,7 @@ base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
 # testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";parse_analysis_subdir="all-well/DGE_filtered";do_integration=F
 
 # filters taken from Li et al., 2023 (PMID: 36563681)
-# >300 total transcripts
+# >300 total transcripts -> 100
 # >200 & <10000 genes expressed
 # >1000 UMIs
 # <10% mt genes expressed
@@ -28,12 +36,13 @@ library(devtools) ; load_all() ; generate_qc_report(
   remove_doublets = T,
   do_filtering = T,
   min_nuclei_per_gene = 5,
-  min_nCount_RNA = 300,
+  min_nCount_RNA = 100,
   max_nCount_RNA = 10000,
-  min_nFeature_RNA = 200,
+  min_nFeature_RNA = 100,
   max_nFeature_RNA = 10000,
-  max_percent_mito = 10,
+  max_percent_mito = 12,
   final_clustering_resolution = 0.3,
   do_integration = do_integration,
-  do_timestamp = T)
+  do_timestamp = T,
+  sample_subset = sample_subset)
 

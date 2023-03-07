@@ -15,11 +15,11 @@ library(devtools)
 load_all()
 ```
 
-```{r testing, include = F, eval = T}
-testing = T
+```{r testing, include = testing == T, eval = testing == T}
 args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/args_for_generate_qc_report.R") 
 args$parse_dir <- paste0(get_base_dir(), "/parse_pipeline/") 
-out <- list(base = "out/test/")
+out <- list(base = paste0(get_base_dir(), "/vhl/out/test/"))
+sample_subset <- c("N090_V124A", "N090_V127")
 ```
 
 **Run info:**
@@ -85,11 +85,6 @@ seu <- load_parse_to_seurat(
     do_add_summary_stats = T,
     groupings
   )
-```
-
-```{r testing_subset, include = testing == T, eval = testing == T}
-seu <- seu[sample(nrow(seu), size = as.integer(0.2*nrow(seu))), 
-           sample(ncol(seu), size = as.integer(0.1*ncol(seu)))]
 ```
 
 ```{r save_seu, warning = F}
@@ -195,6 +190,10 @@ Proportions of transcript types of interest (mitochondrial, ribosomal, globin) a
 seu <- annotate_proportions_of_transcript_types(seu)
 ```
 
+### Cell counts
+
+![Barcode Rank!](`r paste(parse_dir, "analysis", experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/")`){width = "1280"}
+
 ### Define nucleus-level filters
 
 The `do_filtering` argument is set to **`r do_filtering`**.
@@ -221,7 +220,7 @@ seu@misc$nucleus_filtering %>%
 
 `r paste(paste("*", names(unlist(seu@misc$filters))) %>% gsub("\\.", " ", .), paste0("**", unlist(seu@misc$filters), "**"), collapse = "  \n", sep = " = ")`
 
-```{r filters_vs_distribution_vln, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution"}
+```{r filters_vs_distribution_vln_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution"}
 p <- 
     seu@misc$nucleus_filtering %>%
     tidyr::pivot_longer(names(seu@misc$filters)) %>%
@@ -244,7 +243,7 @@ p <-
 p
 ```
 
-```{r fail_criteria_proportions, class.source = 'fold-hide', fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
+```{r fail_criteria_plot, class.source = 'fold-hide', fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
 p <- 
   seu@misc$nucleus_filtering %>%
   dplyr::group_by(sample) %>%
@@ -256,11 +255,21 @@ p <-
 p
 ```
 
-```{r nucleus_scatter_with_filters, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
+```{r nucleus_scatter_with_filters_plot, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
 p <- 
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours, log_y = T) +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours) +
     ggplot2::theme(legend.position = "none") +
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", ditto_colours)
+p
+```
+
+```{r log_nucleus_scatter_with_filters_plot, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei (log scale)"}
+p <- 
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours, 
+                                      log_x = T, log_y = T) +
+    ggplot2::theme(legend.position = "none") +
+    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", ditto_colours, 
+                                      log_x = T, log_y = T)
 p
 ```
 
@@ -288,7 +297,7 @@ Find the most highly variable genes (HVGs) across samples.
 seu <- Seurat::FindVariableFeatures(seu)
 ```
 
-```{r hvg_scatter, class.source = 'fold-hide', warning = F, message = F, fig.cap = "Plot of HVGs"}
+```{r hvg_scatter_plot, class.source = 'fold-hide', warning = F, message = F, fig.cap = "Plot of HVGs"}
 p <- 
   Seurat::LabelPoints(
     plot = Seurat::VariableFeaturePlot(seu, raster = F),
@@ -299,7 +308,7 @@ p <-
 p
 ```
 
-```{r hvg_heatmap, class.source = 'fold-hide', fig.cap = "Heatmap of top 20 HVGs"}
+```{r hvg_heatmap_plot, class.source = 'fold-hide', fig.cap = "Heatmap of top 20 HVGs"}
 p <- 
   dittoSeq::dittoHeatmap(
     seu,
@@ -380,11 +389,13 @@ Dimensionality reduction is performed to isolated the strongest signals and to r
 seu <- Seurat::RunPCA(seu)
 ```
 
-```{r pc1_vs_pc2, class.source = 'fold-hide', fig.cap = "Plot of PC1 vs PC2, coloured by sample"}
+```{r pc1_vs_pc2_plot, class.source = 'fold-hide', fig.cap = "Plot of PC1 vs PC2, coloured by sample"}
 p <- 
-  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "pca", raster = F)
+  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "pca", raster = F) 
 p
 ```
+
+
 
 ```{r pca_dim, class.source = 'fold-hide', fig.cap = "Plot of cells and genes sorted by their PC scores for PC1 and PC2"}
 p <- 
@@ -470,7 +481,7 @@ seu <- Seurat::RunTSNE(seu)
 seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
 ```
 
-```{r samples_vs_reductions, class.source = 'fold-hide', fig.dim = get_fig_dims(dplyr::n_distinct(seu$nih_pid), height_to_width_ratio = 1.25), fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
+```{r samples_vs_reductions, class.source = 'fold-hide', fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
 p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F,
                          legend.show = F) +
@@ -818,14 +829,16 @@ p
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
-```{r, echo = FALSE, results = 'asis'}
+```{r plot_markers, eval = T, echo = FALSE, results = 'asis'}
 to_knit <- c()
 for(study in names(markers)) {
   info <- stringr::str_split(study, "_")[[1]]
       if (length(info) == 3) {
+        author <- info[3]
         heading <- paste0(
-          "#### [", info[3], " et al. (", info[2], ")](https://pubmed.ncbi.nlm.nih.gov/", info[1], ") markers\n")
+          "#### [", author, " et al. (", info[2], ")](https://pubmed.ncbi.nlm.nih.gov/", info[1], ") markers\n")
       } else {
+        author <- info
         heading <- paste("####", info, "markers\n")
       }
   to_knit <- c(to_knit, heading)
@@ -838,14 +851,21 @@ for(study in names(markers)) {
     to_knit <- c(to_knit, subheading)
     
     for(ct in names(avail_markers)) {
+      chunk_name <-
+        paste(author, source, ct, sep = "_") %>%
+        janitor::make_clean_names()
       subsubheading <- paste0("Population: **", ct, "**\n")
       ct_markers <- avail_markers[[ct]]
       n_ct_markers <- length(ct_markers)
       to_knit <- c(to_knit, subsubheading)
       
+      rlang::warn(chunk_name)
+      if (grepl("\\W", chunk_name)) rlang::warn(sprintf("Illegal characters used in '%s'", chunk_name))
+      
       knit <- knitr::knit_child(text = c(
         '',
-        '```{r echo = F, fig.dim = get_fig_dims(n_ct_markers, height_to_width_ratio = 0.8)}',
+        paste0('```{r ', chunk_name, 
+               ', echo = F, fig.dim = get_fig_dims(n_ct_markers, height_to_width_ratio = 0.8)}'),
         'p <- plot_markers_on_umap(seu, ml = ct_markers)',
         'p',
         '```',
@@ -866,7 +886,7 @@ From [**github.com/AntonioDeFalco/SCEVAN**](https://github.com/AntonioDeFalco/SC
 >  ***Single CEll Variational Aneuploidy aNalysis (SCEVAN)***
 >  *SCEVAN is an R package that starting from the raw count matrix of scRNA data automatically classifies the cells present in the biopsy by segregating non-malignant cells of tumor microenviroment from the malignant cells and also characterizes the clonal structure of these malignant cells. It identfies cell subpopulations with different copy number architecture and reports the specific and shared alterations of each subpopulation. The aim of the tool is to automate the entire analysis by allowing it to be performed in a very simple and completely unsupervised way.*
 
-```{r scevan_dir, eval = T, include = F}
+```{r scevan_dir, eval = F, include = F}
 scevan_dir <- paste0(out$base, "/SCEVAN/")
 dir.create(scevan_dir, showWarnings = F)
 ```
@@ -884,17 +904,20 @@ results <- SCEVAN::multiSampleComparisonClonalCN(seu_counts_by_sample)
 # move output to SCEVAN dir
 file.rename("output/", scevan_dir)
 
-# add SCEVAN results to seu metadata
-seu <- Seurat::AddMetaData(seu, metadata = results)
-
-# save seu_scevan
-saveRDS(seu, file = paste0(out$base, "/seu_scevan.rds"))
- 
-# ![SCEVAN copy number of each sample!](`r scevan_dir`/all_compareClonalCN.png){width = "1280"}
-# ![SCEVAN tSNE vs CNA!](`r scevan_dir`/tsne_CNA.png){width = "1280"}
-# ![SCEVAN tSNE vs classification!](`r scevan_dir`/tsne_scRNA.png){width = "1280"}
-# ![SCEVAN OncoPrint!](`r scevan_dir`/OncoHeat.png){width = "1280"}
+# save results
+saveRDS(results, paste0(scevan_dir, "/results.rds"))
 ```
 
-
+```{r scevan_output, eval = F}
+knitr::include_graphics(
+  paste0(
+    scevan_dir,
+    c("all_compareClonalCN.png",
+      "tsne_CNA.png",
+      "tsne_scRNA.png",
+      "OncoHeat.png"
+    )
+  )
+)
+```
 

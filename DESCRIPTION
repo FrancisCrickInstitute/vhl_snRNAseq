@@ -29,6 +29,7 @@ Imports:
     pheatmap,
     purrr,
     readr,
+    rlang,
     rmarkdown,
     scDblFinder,
     Seurat,

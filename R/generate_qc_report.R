@@ -22,6 +22,7 @@
 #' @param do_timestamp If `TRUE`, will save the output to a time-stamped subdirectory (e.g. `20230217_105554/`).
 #' @param do_integration If `TRUE`, will integrate the dataset and save the output to `integrated/` subdirectory. If `FALSE` (default), output will save to `unintegrated/` subdirectory.
 #' @param integration_col If `do_integration` is `TRUE`, Seurat metadata column upon which to integrate the dataset.
+#' @param testing If `testing` is `TRUE`, a test run of the function is performed using a subset of a small dataset. The output is saved to `out/test/`.
 #' @return A Seurat object.
 #'
 #' @export
@@ -30,7 +31,7 @@ generate_qc_report <-
            experiment,
            genome = "hg38",
            sublibrary = "comb",
-           parse_analysis_subdir = "all-well/DGE_filtered/",
+           parse_analysis_subdir = "all-well/DGE_unfiltered/",
            do_filtering = T,
            remove_doublets = F,
            min_nuclei_per_gene = 5,
@@ -47,7 +48,8 @@ generate_qc_report <-
            sample_subset = NULL,
            do_timestamp = F,
            do_integration = F,
-           integration_col = "sample") {
+           integration_col = "sample",
+           testing = F) {
 
   # for internal test runs
   # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=F;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";
@@ -81,7 +83,8 @@ generate_qc_report <-
                sample_subset = sample_subset,
                do_timestamp = do_timestamp,
                do_integration = do_integration,
-               integration_col = integration_col)
+               integration_col = integration_col,
+               testing = testing)
 
   # check arguments
   check_args(args)
@@ -104,6 +107,12 @@ generate_qc_report <-
                     knit_root_dir = rprojroot::find_rstudio_root_file(),
                     output_dir = out$base,
                     output_file = "qc_report",
-                    params = list(args, out = out, testing = F))
+                    params = list(args, out = out, testing = testing))
 
-}
+  }
+
+# library(devtools);load_all();testing=T;rmarkdown::render(system.file("rmd", "generate_qc_report.rmd", package = "vhl"),
+#                   knit_root_dir = rprojroot::find_rstudio_root_file(),
+#                   output_file = "qc_report",
+#                   output_dir = paste0(rprojroot::find_rstudio_root_file(), "out/test/"),
+#                   params = list(args, out = out, testing = testing))

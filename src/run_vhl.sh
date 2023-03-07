@@ -16,11 +16,21 @@ cd /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/
 # get parse_pipeline runs to analyse
 Rscript src/get_runs.R
 
-# run analyse_snRNAseq
+# run generate_qc_report
 cat out/runs.tsv | sed 1d | grep FALSE | grep -P '230210|221202' |
-grep -P 'comb|SHE5052A9_S101' | grep -P '\thg38\t' | grep DGE_filtered |
+grep -P 'comb|SHE5052A9_S101' | grep -P '\thg38\t' | grep DGE_unfiltered |
 {
-  while read path experiment genome sublibrary parse_analysis_subdir do_integration ; do
+  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset ; do
+    . src/submit_generate_qc_report.sh
+  done
+}
+
+# full final run
+cat out/runs.tsv | sed 1d |
+grep -P '230210_A01366_0351_AHNHCFDSX5,221202_A01366_0326_AHHTTWDMXY' |
+grep DGE_unfiltered | grep FALSE |
+{
+  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset ; do
     . src/submit_generate_qc_report.sh
   done
 }
