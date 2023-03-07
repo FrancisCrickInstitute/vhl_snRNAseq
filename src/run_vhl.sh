@@ -34,12 +34,3 @@ grep DGE_unfiltered | grep FALSE |
     . src/submit_generate_qc_report.sh
   done
 }
-
-# # run manually:
-# cat out/runs.tsv | sed 1d |
-# {
-#   while read path experiment genome sublibrary parse_analysis_subdir do_integration ; do
-#     Rscript src/run_analyse_snRNAseq.R   \
-#       $experiment   $genome   $sublibrary  $parse_analysis_subdir $do_integration
-#   done
-# }

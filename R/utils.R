@@ -227,7 +227,7 @@ plot_markers_on_umap <- function(seu, ml) {
   p <- list()
   purrr::walk(ml, function(g) {
       p[[g]] <<-
-        dittoSeq::dittoDimPlot(seu, g, size = 0.7, xlab = NULL, ylab = NULL) +
+        dittoSeq::dittoDimPlot(seu, g, size = 0.5, xlab = NULL, ylab = NULL) +
         ggplot2::theme(axis.text = ggplot2::element_blank(),
                        axis.title = ggplot2::element_blank(),
                        axis.ticks = ggplot2::element_blank())
@@ -243,7 +243,7 @@ plot_markers_on_umap <- function(seu, ml) {
 
 # Calculate plot height for grids
 get_fig_dims <- function(n_plots, n_cols = 3, grid_width = 10, height_to_width_ratio = 1) {
-  # n rows in the grid 
+  # n rows in the grid
   n_rows <- floor((n_plots + n_cols - 1) / n_cols)
   # get height proportionate to width
   grid_height <- (grid_width / n_cols) * n_rows * height_to_width_ratio

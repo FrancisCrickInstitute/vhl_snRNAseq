@@ -8,6 +8,12 @@ output:
   html_document:
     keep_md: true
     code_folding: show
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    toc_depth: 3
+    number_sections: true
+    theme: lumen
 ---
 
 ```{r load_vhl_package, include = F}
@@ -62,7 +68,7 @@ knitr::opts_chunk$set(fig.align = "center",
                       dpi = 300)
 ```
 
-## Load data and filter genes
+# Load data and filter genes
 
 Load Parse Biosciences split-pipe pipeline output as a Seurat object with no cut-offs, remove any missing samples, add sample metadata, add summary statistics, and optionally subset samples. Then filter nuclei per gene. 
 
@@ -92,8 +98,6 @@ seu <- load_parse_to_seurat(
 saveRDS(seu, file = paste0(out$base, "/seu.rds"))
 ``` 
 
-## Sample-level overview
-
 ```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F, fig.cap = "Plot of nuclei per sample"}
 p <-
   dplyr::tibble(sample_id = names(table(seu$sample)),
@@ -114,7 +118,7 @@ p <-
 p
 ```
 
-## Filter nuclei
+# Filter nuclei
 
 Nucleus-level filtering is performed, applying cut-offs to `nCount_RNA`, `nFeature_RNA`, `percent_mito`, and `doublet` values of each nucleus.
 
@@ -123,7 +127,7 @@ Nucleus-level filtering is performed, applying cut-offs to `nCount_RNA`, `nFeatu
 * A high percentage of mitochondrial genes indicates death, loss of cytoplasmic RNA, or increased apoptosis. Differences in the application of this filter between scRNA-seq and snRNA-seq are not well covered in literature. Intuitively, snRNA-seq data should be treated with a more stringent cut-off, as it should only include nuclear RNA. However, the renal cortex has an exceptionally high level of mitochondrial activity, so this cut-off has been relaxed somewhat for the VHL dataset. 
 * Nuclei with a high nFeature_RNA:nCount_RNA ratio could be from dying cells.
 
-### Annotate doublets
+## Annotate doublets
 
 Putative doublets are identified using the `scDblFinder` package. This package creates artificial doublets by grouping together random pairs of nuclei within each sample to create pseudo-doublets, and then identifying nuclei that cluster near to these pseudo-doublets during dimensionality reduction. This co-clustering indicates that they carry a doublet signature. 
 
@@ -178,7 +182,7 @@ p <-
 p
 ```
 
-### Annotate transcript types
+## Annotate transcript types
 
 Proportions of transcript types of interest (mitochondrial, ribosomal, globin) are annotated. Mitochondrial genes are particularly of interest for filtering, but it is good practice to inspect the others as well.
 
@@ -190,11 +194,11 @@ Proportions of transcript types of interest (mitochondrial, ribosomal, globin) a
 seu <- annotate_proportions_of_transcript_types(seu)
 ```
 
-### Cell counts
+## Cell counts
 
-![Barcode Rank!](`r paste(parse_dir, "analysis", experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/")`){width = "1280"}
+![Barcode Rank!](`r paste(parse_dir, "analysis", experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/")`)
 
-### Define nucleus-level filters
+## Define nucleus-level filters
 
 The `do_filtering` argument is set to **`r do_filtering`**.
 `r if (do_filtering == T) {"Filters will be applied." }`
@@ -213,12 +217,36 @@ seu <- get_filters(
 )
 ```
 
-```{r filtering_stats, echo = F, eval = F}
-seu@misc$nucleus_filtering %>%
-  tidyr::separate_longer_delim(fail_criteria, ",")
+### Fail criteria statistics
+
+```{r fail_criteria_stats, echo = F, message = F}
+n_retained <- nrow(dplyr::filter(seu@misc$nucleus_filtering, pass))
+n_total <- nrow(seu@misc$nucleus_filtering)
+dplyr::left_join(
+  seu@misc$filters %>% dplyr::bind_rows(.id = "fail_criteria"),
+  seu@misc$nucleus_filtering %>%
+  dplyr::filter(!pass) %>%
+  tidyr::separate_longer_delim(fail_criteria, ",") %>%
+  dplyr::count(fail_criteria) %>%
+  dplyr::mutate(`%` = round((n / n_total) * 100, 2)),
+  by = "fail_criteria"
+) %>%
+  knitr::kable(align = c("c", "c", "c", "c", "c"))
 ```
 
-`r paste(paste("*", names(unlist(seu@misc$filters))) %>% gsub("\\.", " ", .), paste0("**", unlist(seu@misc$filters), "**"), collapse = "  \n", sep = " = ")`
+`r paste0("**", round((n_retained / n_total) * 100, 1), "%** (", n_retained, " / ", n_total, ") of nuclei retained.")`
+
+```{r fail_criteria_plot, class.source = 'fold-hide', fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
+p <- 
+  seu@misc$nucleus_filtering %>%
+  dplyr::group_by(sample) %>%
+  dplyr::count(fail_criteria) %>%
+  ggplot2::ggplot(ggplot2::aes(x = sample, y = n, fill = fail_criteria)) +
+  ggplot2::geom_col() +
+  ditto_colours +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
+p
+```
 
 ```{r filters_vs_distribution_vln_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution"}
 p <- 
@@ -243,18 +271,6 @@ p <-
 p
 ```
 
-```{r fail_criteria_plot, class.source = 'fold-hide', fig.cap = "Plot of the proportions of filtered nuclei and their fail criteria for each sample"}
-p <- 
-  seu@misc$nucleus_filtering %>%
-  dplyr::group_by(sample) %>%
-  dplyr::count(fail_criteria) %>%
-  ggplot2::ggplot(ggplot2::aes(x = sample, y = n, fill = fail_criteria)) +
-  ggplot2::geom_col() +
-  ditto_colours +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
-p
-```
-
 ```{r nucleus_scatter_with_filters_plot, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
 p <- 
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours) +
@@ -273,12 +289,7 @@ p <-
 p
 ```
 
-### `r if (do_filtering) {"Apply nucleus-level filters"}`
-
-```{r calc_n_retained, include = F} 
-n_retained <- nrow(dplyr::filter(seu@misc$nucleus_filtering, pass))
-n_total <- nrow(seu@misc$nucleus_filtering)
-```
+## `r if (do_filtering) {"Apply nucleus-level filters"}`
 
 ```{r filter_nuclei, eval = do_filtering == T, include = do_filtering == T}
 seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
@@ -287,9 +298,7 @@ seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass
 saveRDS(seu, paste0(out$base, "/seu_filtered.rds"))
 ```
 
-`r paste0(round((n_retained / n_total) * 100, 1), "% (", n_retained, "/", n_total, ") of nuclei retained.")`
-
-## Highest variable genes
+# Highest variable genes
 
 Find the most highly variable genes (HVGs) across samples.
 
@@ -319,7 +328,7 @@ p <-
 p
 ```
 
-## Integration (optional)
+# Integration (optional)
 
 The `do_integration` argument is set to **`r do_integration`**.
 Samples will `r if (do_integration == F) {"**not**"}` be integrated.
@@ -354,7 +363,7 @@ seu <- Seurat::ScaleData(seu)
 saveRDS(seu, paste0(out$base, "/seu_integrated.rds"))
 ```
 
-## Normalisation and scaling
+# Normalisation and scaling
 
 `Seurat::SCTransform()` performs normalisation and scaling of the data. 
 
@@ -367,7 +376,7 @@ seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
 saveRDS(seu, file = paste0(out$base, "/seu_transformed.rds"))
 ```
 
-## Annotate cell cycle phases
+# Annotate cell cycle phases
 
 Nuclei are assigned a score representing the likelihood that they are in each phase of the cell cycle. This is based on the expression levels of genes associated with each phase. The highest probability phase of each nucleus is stored in a new "Phase" column of the metadata.
 
@@ -379,11 +388,11 @@ seu <- Seurat::CellCycleScoring(
 )
 ```
 
-## Dimensionality reduction
+# Dimensionality reduction
 
 Dimensionality reduction is performed to isolated the strongest signals and to remove background noise. 
 
-### Linear dimensionality reduction (PCA)
+## Linear dimensionality reduction (PCA)
 
 ```{r run_pca}
 seu <- Seurat::RunPCA(seu)
@@ -416,13 +425,13 @@ p <-
 p
 ```
 
-### Dimensionality of the data
+## Dimensionality of the data
 
 The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental, as meaningful biological variation may be lost. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate it.
 
 The dimensionality can be decided by consulting the elbow plot (see below) and manually picking a value (set by argument `n_dims`) or it can be calculated using the `intrinsicDimensionality` package. 
 
-#### `r if (!is.null(n_dims)) {"Manually"}`
+### `r if (!is.null(n_dims)) {"Manually"}`
 
 `r if (!is.null(n_dims)) {paste0("Dimensionality of the data is **", n_dims, "** (set by argument n_dims).")}`
 
@@ -430,7 +439,7 @@ The dimensionality can be decided by consulting the elbow plot (see below) and m
 final_n_dims <- n_dims
 ```
 
-#### intrinsicDimensionality
+### intrinsicDimensionality
 
 `r if (is.null(n_dims)) {"No value was provided for n_dims, so dimensionality will be calculated using the intrinsicDimensions package."}`
 
@@ -472,7 +481,7 @@ p <-
 p
 ```
 
-### Non-linear dimensionality reduction (UMAP, tSNE)
+## Non-linear dimensionality reduction (UMAP, tSNE)
 
 Perform non-linear dimensionality reduction of the dataset. 
 
@@ -489,7 +498,7 @@ p <-
 p
 ```
 
-```{r umap_split_by_sample, class.source = 'fold-hide', fig.dim = get_fig_dims(dplyr::n_distinct(seu$nih_pid)), fig.cap = "Plot of UMAP, split by patient"}
+```{r umap_split_by_sample, class.source = 'fold-hide', fig.dim = get_fig_dims(dplyr::n_distinct(seu$nih_pid), n_cols = min(dplyr::n_distinct(seu$nih_pid), 3)), fig.cap = "Plot of UMAP, split by patient and coloured by sample"}
 p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F, legend.show = F, split.by = "nih_pid", split.ncol = 3)
 p
@@ -537,7 +546,7 @@ p <-
 p
 ```
 
-## Clustering
+# Clustering
 
 From [**Clarke et al., 2021**](https://www.nature.com/articles/s41596-021-00534-0)
 
@@ -554,7 +563,7 @@ Setting a **low clustering resolution** will produce fewer clusters, reflect the
 
 **Higher clustering resolutions** will result in more, increasingly granular clusters and can reveal celltype-level groups. In can also reveal new / rare celltypes that are hidden at lower resolutions. Setting the clustering resolution too high, however, can produce meaningless groups and lead to overfitting. 
 
-### Find neighbours
+## Find neighbours
 
 The first step is to compute the `k.param` nearest neighbours for a given dataset. This step constructs a shared nearest neighbours (SNN) graph from euclidean distances between nuclei in PCA space, and then computes edge weights between each pair of nuclei based on their Jaccard similarity (the shared overlap of their local neighborhoods).
 
@@ -562,7 +571,7 @@ The first step is to compute the `k.param` nearest neighbours for a given datase
 seu <- Seurat::FindNeighbors(seu, dims = 1:final_n_dims)
 ```
 
-### Find clusters at different clustering resolutions
+## Find clusters at different clustering resolutions
 
 Then, groups of nuclei are iteratively grouped together. Clusters are identified by a SNN modularity optimisation-based clustering algorithm. This procedure is repeated for all clustering resolutions to be tested (set by the `clustering_resolutions` argument). 
 
@@ -572,9 +581,9 @@ The clustering resolutions to be tested are **`r paste(clustering_resolutions, s
 seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = F)
 ```
 
-### Evaluate all clustering resolutions
+## Evaluate all clustering resolutions
 
-#### Visual inspection
+### Visual inspection
 
 A final clustering resolution can be decided by looking for sensible groupings of nuclei projected onto the dimensionality reduction plots. 
 
@@ -613,7 +622,7 @@ p <-
 p
 ```
 
-#### Clustering tree
+### Clustering tree
 
 Alternatively, the `clustree` package provides a more intuitive way to visualise clustering behaviour at different resolutions and to devide on a final clustering resolution. It constructs clustering trees that show how samples move and split up as the number of clusters increases. A 'solid' clustering resolution is taken as one in a part of the tree where clusters remain relatively stable and constant for a few resolution. This indicates that the groups are robust and strongly supported by the data, rather than volatile and noisy. 
 
@@ -625,7 +634,7 @@ p <-
 p
 ```
 
-### Final clustering resolution
+## Final clustering resolution
 
 `r if (is.null(final_clustering_resolution)) { "A final clustering resolution has not been given. Please run the package again and pass a resolution to the final_clustering_resolution argument to proceed with downstream analysis." }`
 
@@ -678,11 +687,11 @@ p <-
 p
 ```
 
-## Celltype annotation
+# Celltype annotation
 
 The conventional approach to celltype annotation for sc/snRNAseq datasets is to inspect known marker genes from each of the celltypes that are expected and likely to be found at the sample site. Known relationships between marker genes and celltypes of interest can be obtained from databases or manually curated from literature. Then, the expression profiles of all markers from all celltypes across all clusters is programmatically or visually inspected and clusters are labelled according to their marker profile. 
 
-### Automated celltype annotation using database markers
+## Automated celltype annotation using database markers
 
 The package `SingleR` returns "the best annotation for each cell in a test dataset, given a labelled reference dataset in the same feature space". Using the human primary cell atlas from `celldex`, we can find the nearest reference celltype to each nucleus in the dataset. This approach is good because it is unbiased and does not require manual assignment, but it is unclear how well snRNAseq output will map onto a scRNAseq atlas. Additionally, the reference dataset from `celldex` is more rigid, cannot be customised to the use case, and does not contain transformed celltypes. 
 ```{r singler_annots, message = F, warning = F}
@@ -825,11 +834,11 @@ p <-
 p
 ```
 
-### Manual celltype annotation using curated literature markers
+## Manual celltype annotation using curated literature markers
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
-```{r plot_markers, eval = T, echo = FALSE, results = 'asis'}
+```{r, echo = FALSE, results = 'asis'}
 to_knit <- c()
 for(study in names(markers)) {
   info <- stringr::str_split(study, "_")[[1]]
@@ -839,7 +848,7 @@ for(study in names(markers)) {
           "#### [", author, " et al. (", info[2], ")](https://pubmed.ncbi.nlm.nih.gov/", info[1], ") markers\n")
       } else {
         author <- info
-        heading <- paste("####", info, "markers\n")
+        heading <- paste("####", author, "markers\n")
       }
   to_knit <- c(to_knit, heading)
   
@@ -851,49 +860,45 @@ for(study in names(markers)) {
     to_knit <- c(to_knit, subheading)
     
     for(ct in names(avail_markers)) {
-      chunk_name <-
-        paste(author, source, ct, sep = "_") %>%
+      chunk_name <- paste(author, substr(source, 1, 3), ct) %>%
         janitor::make_clean_names()
       subsubheading <- paste0("Population: **", ct, "**\n")
       ct_markers <- avail_markers[[ct]]
       n_ct_markers <- length(ct_markers)
       to_knit <- c(to_knit, subsubheading)
       
-      rlang::warn(chunk_name)
-      if (grepl("\\W", chunk_name)) rlang::warn(sprintf("Illegal characters used in '%s'", chunk_name))
-      
-      knit <- knitr::knit_child(text = c(
-        '',
-        paste0('```{r ', chunk_name, 
-               ', echo = F, fig.dim = get_fig_dims(n_ct_markers, height_to_width_ratio = 0.8)}'),
-        'p <- plot_markers_on_umap(seu, ml = ct_markers)',
-        'p',
-        '```',
-        ''
-      ), envir = environment(), quiet = TRUE)
+      if(n_ct_markers < 50) {
+        knit <- knitr::knit_child(text = c(
+          '',
+          paste0('```{r ', chunk_name, ', echo = F, fig.dim = get_fig_dims(n_ct_markers, height_to_width_ratio = 0.8)}'),
+          'p <- plot_markers_on_umap(seu, ml = ct_markers)',
+          'p',
+          '```',
+          ''
+        ), envir = environment(), quiet = TRUE)
+      } else { knit <- paste(n_ct_markers, "markers in this set - too many to print!\n") }
       to_knit <- c(to_knit, knit)
-    
     }
   }
 }
 cat(unlist(to_knit), sep = '\n')
 ```
 
-## Run SCEVAN
+# Run SCEVAN
 
 From [**github.com/AntonioDeFalco/SCEVAN**](https://github.com/AntonioDeFalco/SCEVAN)
 
 >  ***Single CEll Variational Aneuploidy aNalysis (SCEVAN)***
 >  *SCEVAN is an R package that starting from the raw count matrix of scRNA data automatically classifies the cells present in the biopsy by segregating non-malignant cells of tumor microenviroment from the malignant cells and also characterizes the clonal structure of these malignant cells. It identfies cell subpopulations with different copy number architecture and reports the specific and shared alterations of each subpopulation. The aim of the tool is to automate the entire analysis by allowing it to be performed in a very simple and completely unsupervised way.*
 
-```{r scevan_dir, eval = F, include = F}
-scevan_dir <- paste0(out$base, "/SCEVAN/")
+```{r scevan_dir, eval = T, include = F}
+scevan_dir <- paste0(out$base, "/SCEVAN/") 
 dir.create(scevan_dir, showWarnings = F)
 ```
 
 `SCEVAN` output will be saved to `r scevan_dir`.
 
-```{r run_scevan, eval = F}
+```{r run_scevan, message = F, warning = F, eval = T}
 # split counts by sample
 seu_counts_by_sample <- Seurat::SplitObject(seu, split.by = integration_col) %>%
   purrr::map(~ .x@assays$RNA@data)
@@ -902,22 +907,10 @@ seu_counts_by_sample <- Seurat::SplitObject(seu, split.by = integration_col) %>%
 results <- SCEVAN::multiSampleComparisonClonalCN(seu_counts_by_sample)
 
 # move output to SCEVAN dir
-file.rename("output/", scevan_dir)
+system(paste("mv output/*", scevan_dir, "; rm -Rf output"))
 
 # save results
 saveRDS(results, paste0(scevan_dir, "/results.rds"))
 ```
 
-```{r scevan_output, eval = F}
-knitr::include_graphics(
-  paste0(
-    scevan_dir,
-    c("all_compareClonalCN.png",
-      "tsne_CNA.png",
-      "tsne_scRNA.png",
-      "OncoHeat.png"
-    )
-  )
-)
-```
 

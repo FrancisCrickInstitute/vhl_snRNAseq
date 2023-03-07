@@ -42,11 +42,6 @@ load_parse_to_seurat <-
       seu_i$experiment <- exp
       seu_i$sublibrary <- sublib
 
-      # subset to sample subset
-      if(!is.null(sample_subset)) {
-        seu_i <- subset(x = seu_i, subset = sample %in% sample_subset)
-      }
-
       # remove NA samples
       if(remove_na_samples == T) {
         seu_i <- subset(seu_i, subset = sample %in% seu_i$sample[!is.na(seu_i$sample)])
@@ -55,19 +50,19 @@ load_parse_to_seurat <-
       # add sample metadata
       if(do_add_sample_metadata == T) {
 
-        # read in sample metadata
-        sample_metadata <- paste0(parse_dir, "/expdata/", exp, "/sample_metadata.tsv") %>%
+        # read in sample metadata and add to misc slot
+        seu_i@misc$sample_metadata <-
+          paste0(parse_dir, "/expdata/", exp, "/sample_metadata.tsv") %>%
           readr::read_tsv(show_col_types = F)
 
         # add to Seurat object meta.data
         seu_i@meta.data <-
-          dplyr::left_join(seu_i@meta.data,
-                           sample_metadata %>% dplyr::select(sample, dplyr::any_of(groupings)),
-                           by = "sample")
+          dplyr::left_join(
+            seu_i@meta.data,
+            seu_i@misc$sample_metadata %>%
+              dplyr::select(sample, dplyr::any_of(groupings)),
+            by = "sample")
         rownames(seu_i@meta.data) <- colnames(seu_i)
-
-        # add sample-level table to misc slot
-        seu_i@misc$sample_metadata <- sample_metadata
 
       }
 
@@ -97,6 +92,22 @@ load_parse_to_seurat <-
           )
 
       }
+
+      # subset to sample subset
+      if(!is.null(sample_subset)) {
+
+        seu_i <- subset(x = seu_i, subset = sample %in% sample_subset)
+
+        seu_i@misc$sample_metadata <-
+          seu_i@misc$sample_metadata %>%
+          dplyr::filter(sample %in% sample_subset)
+
+        seu_i@misc$summary_stats <-
+          seu_i@misc$summary_stats %>%
+          dplyr::filter(sample %in% sample_subset)
+
+      }
+
 
       seu_i
 
