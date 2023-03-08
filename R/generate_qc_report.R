@@ -111,8 +111,9 @@ generate_qc_report <-
 
   }
 
-# library(devtools);load_all();testing=T;rmarkdown::render(system.file("rmd", "generate_qc_report.rmd", package = "vhl"),
-#                   knit_root_dir = rprojroot::find_rstudio_root_file(),
+
+# library(devtools);load_all();testing=T;out=list(base=paste0(here::here(), "/out/test/"));rmarkdown::render(system.file("rmd", "generate_qc_report.rmd", package = "vhl"),
+#                   knit_root_dir = here::here(),
 #                   output_file = "qc_report",
-#                   output_dir = paste0(get_base_dir(), "out/test/"),
+#                   output_dir = out$base,
 #                   params = list(args, out = out, testing = testing))

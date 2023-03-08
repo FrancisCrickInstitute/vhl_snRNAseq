@@ -230,13 +230,15 @@ plot_markers_on_umap <- function(seu, ml) {
         dittoSeq::dittoDimPlot(seu, g, size = 0.5, xlab = NULL, ylab = NULL) +
         ggplot2::theme(axis.text = ggplot2::element_blank(),
                        axis.title = ggplot2::element_blank(),
-                       axis.ticks = ggplot2::element_blank())
+                       axis.ticks = ggplot2::element_blank(),
+                       legend.position = "none",
+                       plot.margin = unit(c(2,2,2,2), "pt"))
     })
   # create grob layout
   p <-
     gridExtra::marrangeGrob(grobs = p,
-                            ncol = 3,
-                            nrow = ceiling(length(p) / 3),
+                            ncol = 4,
+                            nrow = ceiling(length(p) / 4),
                             top = NULL)
   return(p)
 }

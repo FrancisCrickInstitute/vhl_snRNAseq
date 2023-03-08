@@ -9,7 +9,7 @@ generate_qc_report(
   experiment,
   genome = "hg38",
   sublibrary = "comb",
-  parse_analysis_subdir = "all-well/DGE_filtered/",
+  parse_analysis_subdir = "all-well/DGE_unfiltered/",
   do_filtering = T,
   remove_doublets = F,
   min_nuclei_per_gene = 5,
@@ -26,7 +26,8 @@ generate_qc_report(
   sample_subset = NULL,
   do_timestamp = F,
   do_integration = F,
-  integration_col = "sample"
+  integration_col = "sample",
+  testing = F
 )
 }
 \arguments{
@@ -71,6 +72,8 @@ generate_qc_report(
 \item{do_integration}{If \code{TRUE}, will integrate the dataset and save the output to \verb{integrated/} subdirectory. If \code{FALSE} (default), output will save to \verb{unintegrated/} subdirectory.}
 
 \item{integration_col}{If \code{do_integration} is \code{TRUE}, Seurat metadata column upon which to integrate the dataset.}
+
+\item{testing}{If \code{testing} is \code{TRUE}, a test run of the function is performed using a subset of a small dataset. The output is saved to \verb{out/test/}.}
 
 \item{cluster_resolutions}{Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.}
 }
