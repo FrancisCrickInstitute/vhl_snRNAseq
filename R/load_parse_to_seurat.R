@@ -10,7 +10,8 @@ load_parse_to_seurat <-
            remove_na_samples = F,
            do_add_sample_metadata = T,
            do_add_summary_stats = T,
-           groupings) {
+           groupings,
+           statistics) {
 
     # testings: # remove_na_samples = F;do_add_sample_metadata = T;do_add_summary_stats = T
 
@@ -76,11 +77,7 @@ load_parse_to_seurat <-
           tidyr::pivot_longer(cols = -statistic, names_to = "sample") %>%
           dplyr::mutate(statistic = statistic %>% gsub(paste0(genome, "\\_"), "", .)) %>%
           dplyr::filter(
-            statistic %in% c(
-              "median_tscp_per_cell",
-              "median_genes_per_cell",
-              "fraction_tscp_in_cells"
-            )
+            statistic %in% statistics
           )  %>%
           # append numeric sample metadata to summary stats
           dplyr::bind_rows(

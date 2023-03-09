@@ -63,6 +63,15 @@ groupings <-
   # if multiple experiments, add to the groupings
   { if (length(experiment) > 1) c(., "experiment") else . }
 
+# statistics of interest in the Parse analysis
+statistics <- 
+  c("median_tscp_per_cell",
+    "median_genes_per_cell",
+    "fraction_tscp_in_cells",
+    "cell_tscp_cutoff",
+    "valid_barcode_fraction"
+    )
+
 # chunk setup
 knitr::opts_chunk$set(fig.align = "center",
                       dpi = 300)
@@ -89,7 +98,8 @@ seu <- load_parse_to_seurat(
     remove_na_samples = T,
     do_add_sample_metadata = T,
     do_add_summary_stats = T,
-    groupings
+    groupings,
+    statistics
   )
 ```
 
@@ -108,7 +118,7 @@ p <-
 p
 ```
 
-```{r summary_statistics_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.cap = "Plot of summary statistics by sample"}
+```{r summary_statistics_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 15, fig.cap = "Plot of summary statistics by sample"}
 p <-
   seu@misc$summary_stats %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
@@ -117,6 +127,10 @@ p <-
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
 p
 ```
+
+- `fraction_tscp_in_cells` - Number of unique transcripts associated with barcodes labeled as "cells" divided by the number of reads associated with barcodes labeled as "background" in the barcode-rank plot.
+- `median_genes_per_cell` - Median number of genes detected per cell.
+- `median_tscp_per_cell` - Median number of transcripts detected per cell.
 
 # Filter nuclei
 
@@ -135,7 +149,9 @@ From [**Parse Biosciences Computational Support**](https://support.parsebioscien
 > 
 > *There may be situations where the cell count estimate does not line up with the researcher's expectations, or the barcode-rank plot lacks a distinct "drop" in the curve. The latter situation can occur when there is an excess number of dead/damaged cells in the data set, creating an intermediate "smoothness" on the curve where a drop would be expected. In order to manually adjust the cell cutoff there are two options: rerun the pipeline at --mode dge using one of the cell calling parameters described in the article Pipeline Options, or read in the unfiltered (DGE_unfiltered) matrix into an analysis package such as Seurat or Scanpy and adjust the minimum transcript threshold in the cell quality control steps. If the user plans on performing a more granular analysis in package such as Seurat or Scanpy, the latter option may be preferable.*
 
-![Barcode Rank!](`r paste(parse_dir, "analysis", experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/")`)
+```{r barcode_rank, echo = F}
+# knitr::include_graphics(paste(parse_dir, "analysis", experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/"))
+```
 
 ## Annotate doublets
 
@@ -235,7 +251,9 @@ n_total <- nrow(seu@misc$nucleus_filtering)
 ```{r fail_criteria_stats, echo = F, message = F}
 options(knitr.kable.NA = '')
 dplyr::left_join(
-  seu@misc$filters %>% dplyr::bind_rows(.id = "fail_criteria"),
+  seu@misc$filters %>% dplyr::bind_rows(.id = "fail_criteria") %>%
+    tidyr::pivot_longer(c("min", "max")) %>%
+    dplyr::transmute(fail_criteria = paste(name, fail_criteria, sep = "_"), value),
   seu@misc$nucleus_filtering %>%
   dplyr::filter(!pass) %>%
   tidyr::separate_longer_delim(fail_criteria, ",") %>%
@@ -243,6 +261,7 @@ dplyr::left_join(
   dplyr::mutate(`%` = round((n / n_total) * 100, 2)),
   by = "fail_criteria"
 ) %>%
+  dplyr::arrange(-n) %>%
   dplyr::bind_rows(dplyr::tibble(fail_criteria = "total:", 
                                  n = n_total - n_retained,
                                  `%` = round((n / n_total) * 100, 2))) %>%
@@ -284,6 +303,10 @@ p <-
 p
 ```
 
+```{r log_filters_vs_distribution_vln_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 10, fig.width = 10, fig.cap = "Plot of filters vs feature distribution (log scale)"}
+p + ggplot2::scale_y_log10()
+```
+
 ```{r nucleus_scatter_with_filters_plot, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei"}
 p <- 
     plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours) +
@@ -293,13 +316,7 @@ p
 ```
 
 ```{r log_nucleus_scatter_with_filters_plot, class.source = 'fold-hide', fig.width = 10, fig.cap = "Plot of filters against distribution of nuclei (log scale)"}
-p <- 
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "percent_mito", ditto_colours, 
-                                      log_x = T, log_y = T) +
-    ggplot2::theme(legend.position = "none") +
-    plot_nucleus_scatter_with_filters(seu, "nCount_RNA", "nFeature_RNA", ditto_colours, 
-                                      log_x = T, log_y = T)
-p
+p + ggplot2::scale_x_log10() + ggplot2::scale_y_log10()
 ```
 
 ## `r if (do_filtering) {"Apply nucleus-level filters"}`
@@ -855,7 +872,7 @@ p
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
-```{r, echo = FALSE, results = 'asis'}
+```{r, echo = FALSE, results = 'asis'} 
 to_knit <- c()
 for(study in names(markers)) {
   info <- stringr::str_split(study, "_")[[1]]

@@ -177,8 +177,15 @@ get_filters <- function(seu,
     dplyr::as_tibble(rownames = "nucleus") %>%
     tidyr::pivot_longer(-c(nucleus, sample)) %>%
     dplyr::rowwise() %>%
-    dplyr::mutate(pass = value >= filters[[name]]$min & value <= filters[[name]]$max,
-                  fail_criteria = ifelse(pass == F, name, NA)) %>%
+    dplyr::mutate(
+      fail_criteria = ifelse(
+        value < filters[[name]]$min, paste0("min_", name),
+        ifelse(
+          value > filters[[name]]$max, paste0("max_", name),
+          NA
+        )
+      ),
+      pass = is.na(fail_criteria)) %>%
     dplyr::group_by(nucleus, sample) %>%
     dplyr::mutate(pass = all(pass),
                   fail_criteria = fail_criteria %>% unique %>% na.omit %>% paste(collapse = ",") %>% dplyr::na_if(., "")) %>%
@@ -226,13 +233,18 @@ plot_markers_on_umap <- function(seu, ml) {
   # list of plots
   p <- list()
   purrr::walk(ml, function(g) {
-      p[[g]] <<-
-        dittoSeq::dittoDimPlot(seu, g, size = 0.5, xlab = NULL, ylab = NULL) +
-        ggplot2::theme(axis.text = ggplot2::element_blank(),
-                       axis.title = ggplot2::element_blank(),
-                       axis.ticks = ggplot2::element_blank(),
-                       legend.position = "none",
-                       plot.margin = unit(c(2,2,2,2), "pt"))
+    seu_g <- subset(seu, cells = Seurat::WhichCells(seu, expression = as.name(g) > 0, slot = "counts"))
+
+    seu[, which(Seurat::FetchData(seu, vars = g) > 0)]
+
+    p[[g]] <<-
+      dittoSeq::dittoDimPlot(seu, g, size = 0.5, xlab = NULL, ylab = NULL) +
+      ggplot2::scale_colour_gradientn(colours = c("grey", "#ECE147", "#2374B0"), values = c(0, 1e-6, Inf)) +
+      ggplot2::theme(axis.text = ggplot2::element_blank(),
+                     axis.title = ggplot2::element_blank(),
+                     axis.ticks = ggplot2::element_blank(),
+                     legend.position = "none",
+                     plot.margin = ggplot2::unit(c(2,2,2,2), "pt"))
     })
   # create grob layout
   p <-
@@ -242,6 +254,8 @@ plot_markers_on_umap <- function(seu, ml) {
                             top = NULL)
   return(p)
 }
+
+
 
 # Calculate plot height for grids
 get_fig_dims <- function(n_plots, n_cols = 3, grid_width = 10, height_to_width_ratio = 1) {
