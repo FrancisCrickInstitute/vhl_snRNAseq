@@ -250,7 +250,11 @@ plot_markers_on_umap <- function(seu, ml) {
   purrr::walk(ml, function(g) {
     p[[g]] <<-
       dittoSeq::dittoDimPlot(seu, g, size = 0.4, xlab = NULL, ylab = NULL) +
-      ggplot2::scale_colour_gradientn(colours = c("grey", "#ECE147", "#2374B0"), values = c(0, 1e-6, Inf)) +
+      ggplot2::scale_colour_gradientn(colours = c("lightgrey", "#ECE147", "#2374B0"),
+                                      values = scales::rescale(
+                                        c(0,
+                                          min(seu@assays$RNA@counts[g,], na.rm = T),
+                                          max(seu@assays$RNA@counts[g,], na.rm = T)))) +
       umap_void_theme
     })
   # create grob layout

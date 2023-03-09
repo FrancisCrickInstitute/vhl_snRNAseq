@@ -55,6 +55,12 @@ ggplot2::theme_set(ggplot2::theme_bw())
 ggplot2::theme_update(legend.text = ggplot2::element_text(size = 7))
 ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()),
                       ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
+umap_void_theme <-
+    ggplot2::theme(axis.text = ggplot2::element_blank(),
+                   axis.title = ggplot2::element_blank(),
+                   axis.ticks = ggplot2::element_blank(),
+                   legend.position = "none",
+                   plot.margin = ggplot2::unit(c(2,2,2,2), "pt"))
 
 # set sample groupings to check at the clustering stage
 groupings <- 
@@ -698,17 +704,17 @@ seu$cluster <- factor(seu$cluster, levels = paste(sort(as.integer(levels(seu$clu
 saveRDS(seu, paste0(out$base, "/seu_clustered.rds"))
 ```
 
-```{r final_clusters, class.source = 'fold-hide', fig.width = 5, fig.cap = "Plot of final clusters"}
-p <-
+```{r final_clusters, class.source = 'fold-hide', fig.dim = c(5, 5), fig.cap = "Plot of final clusters"}
+final_clusters_umap <-
   dittoSeq::dittoDimPlot(seu, "cluster", size = 0.5, xlab = NULL, ylab = NULL) +
     ggplot2::geom_label(
       data = seu@meta.data %>%
         dplyr::right_join(get_centroids(seu, "umap", cluster), by = "cluster") %>%
         dplyr::distinct(cluster, x, y),
       ggplot2::aes(x, y, label = cluster),
-      size = 3, fill = 'white', alpha = 0.7, label.size = NA
-  )
-p
+      size = 3, fill = 'white', alpha = 0.7, label.size = NA) +
+  umap_void_theme
+final_clusters_umap
 ```
 
 ```{r clusters_per_sample, class.source = 'fold-hide', fig.cap = "Plots of clusters per sample and samples per cluster"}
@@ -792,7 +798,7 @@ avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colDa
 # plot all groupings vs all reductions
 groupings_vs_reductions <- list()
 purrr::walk(avail_groupings, function(grouping) {
-  purrr::walk(names(cds@reduce_dim_aux), function(redu) {
+  purrr::walk(c("PCA", "UMAP"), function(redu) {
     title <- paste0(redu, "_vs_", grouping)
     p <- 
       monocle3::plot_cells(
@@ -826,7 +832,7 @@ p
 
 ### Clustering
 
-We can now cluster the cells. Monocle3 does not require a user-defined clustering resolution, as it can detect an optimum resolution automatically. Additionally, it groups the data into both high-resolution (cluster) and low-resolution (supercluster/partition) communities simultaneously.
+We can now cluster the cells. Monocle3 does not require a user-defined clustering resolution, as it can detect an optimum resolution automatically. Additionally, it groups the data into both high-resolution (cluster) and low-resolution (supercluster, a.k.a. partition) communities simultaneously.
 
 ```{r mon_cluster_cells}
 cds <- monocle3::cluster_cells(cds)
@@ -843,7 +849,7 @@ p
 
 Once cells have been clusters, we can isolate genes that are highly differentially expressed between the clusters.
 
-```{r mon_cluster_markers}
+```{r mon_cluster_markers, results = F, warning = F}
 marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", 
                                          reference_cells = 1000, 
                                          speedglm.maxiter = 100)
@@ -920,7 +926,7 @@ seu$singler_annot <- seu_singler %>%
 saveRDS(seu, paste0(out$base, "/seu_annotated.rds"))
 ```
 
-```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 7, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
+```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 6, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
 # add celltype annotation labels for plotting
 seu$singler_annot_label <- seu@meta.data %>%
   dplyr::group_by(cluster, singler_annot) %>%
@@ -952,8 +958,10 @@ p <-
     min.segment.length = 0,
     size = 2, fill = NA, seed = 1234, label.size = NA
   ) +
+  umap_void_theme +
   ggplot2::theme(legend.position = "bottom") +
   dittoSeq::dittoDimPlot(seu, "sample", size = 0.7) +
+  umap_void_theme + 
   ggplot2::theme(legend.position = "bottom")
 p
 ```
@@ -1026,7 +1034,7 @@ p
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
-```{r, echo = FALSE, results = 'asis'} 
+```{r, echo = FALSE, warning = F, message = F, results = 'asis'} 
 to_knit <- c()
 for(study in names(markers)) {
   info <- stringr::str_split(study, "_")[[1]]
@@ -1049,6 +1057,8 @@ for(study in names(markers)) {
                          "**", length(unlist(avail_markers)), "** markers are present in the dataset.\n")
     to_knit <- c(to_knit, subheading)
     
+    seu <- Seurat::AddModuleScore(seu, features = avail_markers, name = )
+    
     for(ct in names(avail_markers)) {
       chunk_name <- paste(author, substr(source, 1, 3), ct) %>%
         janitor::make_clean_names()
@@ -1060,8 +1070,9 @@ for(study in names(markers)) {
       if(n_ct_markers > 1) {
         knit <- knitr::knit_child(text = c(
           '',
-          paste0('```{r ', paste0(chunk_name, "_module"), ', echo = F, fig.dim = get_fig_dims((n_ct_markers + 1), n_cols = 4, height_to_width_ratio = 1.2)}'),
-          'p <- plot_markers_on_umap(seu, ml = ct_markers)',
+          paste0('```{r ', paste0(chunk_name, "_module"), ', fig.dim = c(10,5)}'),
+          'seu <- Seurat::AddModuleScore(seu, features = list(ct_markers), name = chunk_name)',
+          'p <- final_clusters_umap + dittoSeq::dittoDimPlot(seu, paste0(chunk_name, "1")) + umap_void_theme'
           'p',
           '```',
           ''
