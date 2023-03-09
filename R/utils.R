@@ -230,21 +230,28 @@ get_available_markers <- function(seu, marker_list) {
 
 # Plot all markers in the marker list (marker_list is a named list of marker modules)
 plot_markers_on_umap <- function(seu, ml) {
+  umap_void_theme <-
+    ggplot2::theme(axis.text = ggplot2::element_blank(),
+                   axis.title = ggplot2::element_blank(),
+                   axis.ticks = ggplot2::element_blank(),
+                   legend.position = "none",
+                   plot.margin = ggplot2::unit(c(2,2,2,2), "pt"))
   # list of plots
   p <- list()
+  p[["clusters"]] <-
+    dittoSeq::dittoDimPlot(seu, "cluster", size = 0.4, xlab = NULL, ylab = NULL) +
+    ggplot2::geom_label(
+      data = seu@meta.data %>%
+        dplyr::right_join(get_centroids(seu, "umap", cluster), by = "cluster") %>%
+        dplyr::distinct(cluster, x, y),
+      ggplot2::aes(x, y, label = cluster),
+      size = 3, fill = 'white', alpha = 0.8, label.size = NA) +
+    umap_void_theme
   purrr::walk(ml, function(g) {
-    seu_g <- subset(seu, cells = Seurat::WhichCells(seu, expression = as.name(g) > 0, slot = "counts"))
-
-    seu[, which(Seurat::FetchData(seu, vars = g) > 0)]
-
     p[[g]] <<-
-      dittoSeq::dittoDimPlot(seu, g, size = 0.5, xlab = NULL, ylab = NULL) +
+      dittoSeq::dittoDimPlot(seu, g, size = 0.4, xlab = NULL, ylab = NULL) +
       ggplot2::scale_colour_gradientn(colours = c("grey", "#ECE147", "#2374B0"), values = c(0, 1e-6, Inf)) +
-      ggplot2::theme(axis.text = ggplot2::element_blank(),
-                     axis.title = ggplot2::element_blank(),
-                     axis.ticks = ggplot2::element_blank(),
-                     legend.position = "none",
-                     plot.margin = ggplot2::unit(c(2,2,2,2), "pt"))
+      umap_void_theme
     })
   # create grob layout
   p <-

@@ -69,4 +69,4 @@ generate_qc_report(
   sample_subset = sample_subset)
 
 # save output to 'latest' directory
-system(paste0("mkdir -p ", out$base, "/../latest/ ; cp -R ", out$base, " ", out$base, "/../latest/"))
+system(paste0("mkdir -p ", out$base, "/../latest/ ; cp -R ", out$base, "/* ", out$base, "/../latest/"))
