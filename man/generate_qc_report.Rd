@@ -27,6 +27,7 @@ generate_qc_report(
   do_timestamp = F,
   do_integration = F,
   integration_col = "sample",
+  final_celltype_annotations = NULL,
   testing = F
 )
 }

@@ -50,5 +50,12 @@ runs <-
       dplyr::mutate(sample_subset = paste(final_samples, collapse = ","))
     )
 
+# allocate resources
+runs <- runs %>%
+  dplyr::mutate(mem = dplyr::case_when(experiment == "221202_A01366_0326_AHHTTWDMXY" ~ 60,
+                                       experiment == "230127_A01366_0343_AHGNCVDMXY" ~ 80,
+                                       experiment == "230210_A01366_0351_AHNHCFDSX5" ~ 120,
+                                       experiment == "230210_A01366_0351_AHNHCFDSX5,221202_A01366_0326_AHHTTWDMXY" ~ 150))
+
 # write to out/
 readr::write_tsv(runs, "out/runs.tsv")

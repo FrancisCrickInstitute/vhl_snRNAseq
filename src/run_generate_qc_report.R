@@ -39,6 +39,8 @@ setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 
 library(devtools) ; load_all() ;
 
+do_timestamp = F
+
 # get output dir
 out <- get_out(out_dir = NULL,
                experiment,
@@ -46,7 +48,7 @@ out <- get_out(out_dir = NULL,
                sublibrary,
                parse_analysis_subdir,
                do_integration,
-               do_timestamp = T)
+               do_timestamp = do_timestamp)
 
 # run qc report
 generate_qc_report(
@@ -69,4 +71,6 @@ generate_qc_report(
   sample_subset = sample_subset)
 
 # save output to 'latest' directory
-system(paste0("mkdir -p ", out$base, "/../latest/ ; cp -R ", out$base, "/* ", out$base, "/../latest/"))
+if(do_timestamp = T) {
+  system(paste0("mkdir -p ", out$base, "/../latest/ ; cp -R ", out$base, "/* ", out$base, "/../latest/"))
+}

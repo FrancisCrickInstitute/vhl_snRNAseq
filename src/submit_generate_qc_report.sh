@@ -8,7 +8,7 @@ cat << EOF > $script
 #!/bin/bash
 #SBATCH --job-name=parse_${run_info}
 #SBATCH --time=1-00:00:0
-#SBATCH --mem=150GB
+#SBATCH --mem=${mem}GB
 #SBATCH -o /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/${run_info}.out
 #SBATCH -e /camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/log/${run_info}.err
 
@@ -20,6 +20,7 @@ echo "Parse analysis subdirectory: $parse_analysis_subdir"
 echo "Integration: $do_integration"
 echo "Sample subset: $sample_subset"
 echo "Script: $script"
+echo "Memory allocation: $mem GB"
 echo "------------------------------"
 
 # codify params

@@ -234,14 +234,14 @@ plot_markers_on_umap <- function(seu, ml, final_clusters_umap, umap_void_theme) 
   p <- list()
   p[["clusters"]] <- final_clusters_umap
   purrr::walk(ml, function(g) {
-    seu[g, seu@assays$RNA@counts[g,] == 0] <- NA
     p[[g]] <<-
       dittoSeq::dittoDimPlot(seu, g,
-                             size = 0.4, xlab = NULL, ylab = NULL) +
+                             size = 0.3, xlab = NULL, ylab = NULL) +
       ggplot2::scale_colour_gradientn(colours = c("lightgrey", "#ECE147", "#2374B0"),
                                       values = scales::rescale(
                                         c(0,
-                                          min(seu@assays$RNA@counts[g,], na.rm = T),
+                                          min(seu@assays$RNA@counts[g,seu@assays$RNA@counts[g,] > 0],
+                                              na.rm = T),
                                           max(seu@assays$RNA@counts[g,], na.rm = T)))) +
       umap_void_theme
     })

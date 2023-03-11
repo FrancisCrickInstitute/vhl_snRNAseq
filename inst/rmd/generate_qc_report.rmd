@@ -96,7 +96,8 @@ Gene-level filtering is also performed at this point, based on the `min_nuclei_p
 The minimum number of nuclei per gene is set to **`r min_nuclei_per_gene`**.
 
 ``` {r load_data, warning = F}
-seu <- load_parse_to_seurat(
+seu <- xfun::cache_rds({
+  load_parse_to_seurat(
     parse_dir,
     experiment,
     genome,
@@ -111,12 +112,8 @@ seu <- load_parse_to_seurat(
     groupings,
     statistics
   )
+}, file = "seu.rds", dir = out$base)
 ```
-
-```{r save_seu, warning = F}
-# save seu
-saveRDS(seu, file = paste0(out$base, "/seu.rds"))
-``` 
 
 ```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F, fig.cap = "Plot of nuclei per sample"}
 p <-
@@ -179,7 +176,7 @@ seu <- annotate_doublets(seu)
 seu$doublet <- 0
 ```
 
-```{r detected_doublets_plot, eval = remove_doublets == T, class.source = 'fold-hide', fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
+```{r detected_doublets, eval = remove_doublets == T, class.source = 'fold-hide', fig.cap = "Plot of detected doublets in each sample (using scDblFinder)"}
 p_dat <- 
   seu@meta.data[,c("sample", "doublet", "nCount_RNA", "nFeature_RNA")] %>% 
   dplyr::group_by(sample) %>%
@@ -202,9 +199,9 @@ p <-
   tidyr::pivot_longer(c("nCount_RNA", "nFeature_RNA"), values_to = "count") %>%
   ggplot2::ggplot(ggplot2::aes(y = count, x = sample)) +
   ggplot2::geom_jitter(data = . %>% dplyr::filter(!is_doublet), height = 0,
-                       ggplot2::aes(colour = "singlet"), size = 0.3) +
+                       ggplot2::aes(colour = "singlet"), size = 0.2) +
   ggplot2::geom_jitter(data = . %>% dplyr::filter(is_doublet), height = 0,
-                       ggplot2::aes(colour = "doublet"), size = 0.3) +
+                       ggplot2::aes(colour = "doublet"), size = 0.2) +
   ggplot2::facet_wrap(~ name, scales = "free") +
   ggplot2::scale_colour_manual(
     name = "",
@@ -332,10 +329,9 @@ p + ggplot2::scale_x_log10() + ggplot2::scale_y_log10()
 ## `r if (do_filtering) {"Apply nucleus-level filters"}`
 
 ```{r filter_nuclei, eval = do_filtering == T, include = do_filtering == T}
-seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
-
-# save seu_filtered
-saveRDS(seu, paste0(out$base, "/seu_filtered.rds"))
+seu <- xfun::cache_rds({
+  subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
+}, file = "seu_filtered.rds", dir = out$base)
 ```
 
 # Highest variable genes
@@ -410,10 +406,9 @@ saveRDS(seu, paste0(out$base, "/seu_integrated.rds"))
 Variables to regress out of the `SCTransform` residuals  (set by argument `vars_to_regress`) are **`r paste(vars_to_regress, collapse = "** and **")`**. These variables are prevented from contributing much to the PCA during dimensionality reduction, and thus confounding the analysis, as they are considered to be a source of irrelevant variation.
 
 ```{r sctransform, eval = do_integration == F, include = do_integration == F, results = F, warning = F}
-seu <- Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
-
-# save seu_transformed
-saveRDS(seu, file = paste0(out$base, "/seu_transformed.rds"))
+seu <- xfun::cache_rds({
+  Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
+}, file = "seu_transcformed.rds", dir = out$base)
 ```
 
 # Annotate cell cycle phases
@@ -443,8 +438,6 @@ p <-
   dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "pca", raster = F) 
 p
 ```
-
-
 
 ```{r pca_dim, class.source = 'fold-hide', fig.cap = "Plot of cells and genes sorted by their PC scores for PC1 and PC2"}
 p <- 
@@ -529,8 +522,11 @@ p
 Perform non-linear dimensionality reduction of the dataset. 
 
 ```{r run_nonlin_dim_red, warning = F, message = F}
-seu <- Seurat::RunTSNE(seu)
-seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
+seu <- xfun::cache_rds({
+  seu <- Seurat::RunTSNE(seu)
+  seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
+  seu
+}, file = "seu_nonlin_dim_red.rds", dir = out$base)
 ```
 
 ```{r samples_vs_reductions, class.source = 'fold-hide', fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
@@ -695,11 +691,11 @@ knitr::knit_exit()
 The final clustering resolution has been set to **`r final_clustering_resolution`**. Factor levels must be corrected to numeric ordering. 
 
 ```{r set_res}
-seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
-seu$cluster <- factor(seu$cluster, levels = paste(sort(as.integer(levels(seu$cluster)))))
-
-# save seu_clustered
-saveRDS(seu, paste0(out$base, "/seu_clustered.rds"))
+seu <- xfun::cache_rds({
+  seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
+  seu$cluster <- factor(seu$cluster, levels = paste(sort(as.integer(levels(seu$cluster)))))
+  seu
+}, file = "seu_clustered.rds", dir = out$base)
 ```
 
 ```{r final_clusters, class.source = 'fold-hide', fig.dim = c(5, 5), fig.cap = "Plot of final clusters"}
@@ -766,8 +762,11 @@ From [**Monocle3 documentation**](https://cole-trapnell-lab.github.io/monocle3/d
 First, we must convert the filtered `Seurat` object to Monocle3's proprietary `cell_data_set` object and fill in the gene names.
 
 ```{r seu_to_cds, results = F, warning = F}
-cds <- SeuratWrappers::as.cell_data_set(seu)
-SummarizedExperiment::rowData(cds)$gene_short_name <- row.names(SummarizedExperiment::rowData(cds))
+cds <- xfun::cache_rds({
+  cds <- SeuratWrappers::as.cell_data_set(seu)
+  SummarizedExperiment::rowData(cds)$gene_short_name <- row.names(SummarizedExperiment::rowData(cds))
+  cds
+}, file = "cds.rds", dir = out$base)
 ```
 
 ### Preprocessing and linear dimensionality reduction
@@ -783,7 +782,9 @@ cds <- monocle3::preprocess_cds(cds, num_dim = final_n_dims)
 Next, we perform non-linear dimensionality reduction of the data (UMAP). 
 
 ```{r mon_umap, results = F, warning = F, message = F}
-cds <- monocle3::reduce_dimension(cds)
+cds <- xfun::cache_rds({
+  monocle3::reduce_dimension(cds)
+}, file = "cds_nonlin_dim_red.rds", dir = out$base)
 ```
 
 Plotting all different groupings of the data onto the reductions can help reveal batch effects. If certain experimental variables seem to strongly influence the grouping of cells, these effects can be removed. If so, use the `align_cds` step from [this tutorial](https://cole-trapnell-lab.github.io/monocle3/docs/clustering/#reduce-dimension).
@@ -834,7 +835,9 @@ p
 We can now cluster the cells. Monocle3 does not require a user-defined clustering resolution, as it can detect an optimum resolution automatically. Additionally, it groups the data into both high-resolution clusters and low-resolution superclusters (a.k.a. partitions) simultaneously.
 
 ```{r mon_cluster_cells}
-cds <- monocle3::cluster_cells(cds)
+cds <- xfun::cache_rds({
+  monocle3::cluster_cells(cds)
+}, file = "cds_clustered.rds", dir = out$base) 
 ```
 
 ```{r mon_clusters_and_partitions, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by partition"}
@@ -844,56 +847,31 @@ p <-
 p
 ```
 
-### Marker genes
-
-Once cells have been clusters, we can isolate genes that are highly differentially expressed between the clusters.
-
-```{r mon_cluster_markers, results = F, warning = F}
-marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", 
-                                         reference_cells = 1000, 
-                                         speedglm.maxiter = 100)
-```
-
-```{r mon_top_cluster_markers, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
-# get top 3 markers per cluster
-top_specific_markers <- marker_test_res %>%
-  dplyr::filter(fraction_expressing >= 0.10) %>%
-  dplyr::group_by(cell_group) %>%
-  dplyr::top_n(3, pseudo_R2) %>%
-  dplyr::arrange(cell_group)
-top_specific_marker_ids <- unique(top_specific_markers %>% dplyr::pull(gene_id))
-
-# monocle3::plot_genes_by_group has a bug, so this function doesn't work:
-# p <-
-#   monocle3::plot_genes_by_group(
-#     cds,
-#     markers = (top_specific_marker_ids),
-#     group_cells_by="cluster",
-#     ordering_type="maximal_on_diag",
-#     max.size=3)
-
-# using dittoSeq::dittoDotPlot instead
-seu$cds_cluster <- cds@clusters$UMAP$clusters
-dittoSeq::dittoDotPlot(seu, 
-                       top_specific_marker_ids, 
-                       group.by = "cds_cluster")
-```
-
 # Celltype annotation
 
 The conventional approach to celltype annotation for sc/snRNAseq datasets is to inspect known marker genes from each of the celltypes that are expected and likely to be found at the sample site. Known relationships between marker genes and celltypes of interest can be obtained from databases or manually curated from literature. Then, the expression profiles of all markers from all celltypes across all clusters is programmatically or visually inspected and clusters are labelled according to their marker profile. 
 
 ## Automated celltype annotation using database markers
 
-The package `SingleR` returns "the best annotation for each cell in a test dataset, given a labelled reference dataset in the same feature space". Using the human primary cell atlas from `celldex`, we can find the nearest reference celltype to each nucleus in the dataset. This approach is good because it is unbiased and does not require manual assignment, but it is unclear how well snRNAseq output will map onto a scRNAseq atlas. Additionally, the reference dataset from `celldex` is more rigid, cannot be customised to the use case, and does not contain transformed celltypes. 
+The package `SingleR` returns "the best annotation for each cell in a test dataset, given a labelled reference dataset in the same feature space". Using the human primary cell atlas from `celldex`, we can find the nearest reference celltype to each nucleus in the dataset. This approach is good because it is unbiased and does not require manual assignment, but it is unclear how well snRNAseq output will map onto a scRNAseq atlas. Additionally, the reference dataset from `celldex` is more rigid, cannot be customised to the use case, and does not contain transformed celltypes.
+
+Some annotations will contain very few nuclei. These are usually not of interest and clutter up plotting, so we remove annotations assigned to < 10 nuclei.
 
 ```{r singler_annots, message = F, warning = F}
-human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
-seu_singler <- SingleR::SingleR(
-  test = Seurat::GetAssayData(seu, slot = "data"),
-  ref = human_primary_ref,
-  labels = human_primary_ref$label.main
-)
+seu <- xfun::cache_rds({
+  human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
+  seu_singler <- SingleR::SingleR(
+    test = Seurat::GetAssayData(seu, slot = "data"),
+    ref = human_primary_ref,
+    labels = human_primary_ref$label.main
+  )
+  seu$singler_annot <- seu_singler %>%
+        dplyr::as_tibble() %>%
+        dplyr::group_by(labels) %>%
+        dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
+        dplyr::pull(singler_annot)
+  seu
+}, file = "seu_auto_annotated.rds", dir = out$base)
 ```
 
 ```{r singler_annots_heatmap, class.source = 'fold-hide', fig.width = 10, fig.cap = "Heatmap of celltype annotation scores from SingleR"}
@@ -910,19 +888,6 @@ p
 p <-
   SingleR::plotDeltaDistribution(seu_singler)
 p
-```
-
-Some annotations will contain very few nuclei. These are usually not of interest and clutter up plotting, so we remove annotations assigned to < 10 nuclei.
-
-```{r assign_singler_annots, warning = F}
-seu$singler_annot <- seu_singler %>%
-      dplyr::as_tibble() %>%
-      dplyr::group_by(labels) %>%
-      dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
-      dplyr::pull(singler_annot)
-
-# save seu_annotated
-saveRDS(seu, paste0(out$base, "/seu_annotated.rds"))
 ```
 
 ```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 6, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
@@ -1108,7 +1073,6 @@ cat(unlist(to_knit), sep = '\n')
 knitr::knit_exit()
 ```
 
-
 # Copy number analysis
 
 ## Run SCEVAN
@@ -1141,3 +1105,46 @@ system(paste("mv output/*", scevan_dir, "; rm -Rf output"))
 saveRDS(results, paste0(scevan_dir, "/results.rds"))
 ```
 
+# Differential expression analysis
+
+Once cells have been clustered, we can isolate genes that are highly differentially expressed between the clusters. These cluster marker genes can 
+
+First, we identify the top genes that are most specifically expressed in each cluster and each partition. 
+
+```{r mon_cluster_markers, results = F, warning = F}
+# marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", 
+#                                          reference_cells = 1000)
+cluster_markers <- top_markers_debugged(cds, group_cells_by = "cluster")
+partition_markers <- top_markers_debugged(cds, group_cells_by = "partition")
+
+# save top markers
+readr::write_tsv(marker_test_res, paste0(out$base, "mon_top_markers.tsv"))
+```
+
+```{r mon_top_cluster_markers, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
+# get top 3 markers per cluster
+top_specific_markers <- marker_test_res %>%
+  dplyr::filter(fraction_expressing >= 0.10) %>%
+  dplyr::group_by(cell_group) %>%
+  dplyr::top_n(3, pseudo_R2) %>%
+  dplyr::arrange(cell_group)
+top_specific_marker_ids <- unique(top_specific_markers %>% dplyr::pull(gene_id))
+
+# monocle3::plot_genes_by_group has a bug, so this function doesn't work:
+# p <-
+#   monocle3::plot_genes_by_group(
+#     cds,
+#     markers = (top_specific_marker_ids),
+#     group_cells_by="cluster",
+#     ordering_type="maximal_on_diag",
+#     max.size=3)
+
+# using dittoSeq::dittoDotPlot instead
+seu$cds_cluster <- cds@clusters$UMAP$clusters
+dittoSeq::dittoDotPlot(seu, 
+                       top_specific_marker_ids, 
+                       group.by = "cds_cluster") +
+  ggplot2::theme(text = ggplot2::element_text(size = 6))
+```
+
+# Single-cell trajectories
