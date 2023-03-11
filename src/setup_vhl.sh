@@ -7,7 +7,7 @@ wd=/camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/ ; cd $wd
 
 # create conda env (run on login node)
 source ~/.bashrc
-conda create -n vhl2 -c conda-forge -c bioconda -c r \
+conda create -n vhl -c conda-forge -c bioconda -c r \
   r-essentials \
   r-base \
   r-rmarkdown \
@@ -29,11 +29,3 @@ conda create -n vhl2 -c conda-forge -c bioconda -c r \
   r-janitor \
   r-bookdown \
   r-monocle3
-
-conda create -n vhl2 python=3.9 --yes
-conda activate vhl2
-
-# Install packages. For example:
-conda install python=3.9 pip --yes
-pip install pytest
-
