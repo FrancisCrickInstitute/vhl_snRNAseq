@@ -7,7 +7,7 @@ wd=/camp/project/tracerX/working/VHL_GERMLINE/tidda/vhl/ ; cd $wd
 
 # create conda env (run on login node)
 source ~/.bashrc
-conda create -n vhl -c conda-forge -c bioconda -c r \
+conda create -n vhl2 -c conda-forge -c bioconda -c r \
   r-essentials \
   r-base \
   r-rmarkdown \
@@ -28,4 +28,7 @@ conda create -n vhl -c conda-forge -c bioconda -c r \
   bioconductor-singler \
   r-janitor \
   r-bookdown \
-  r-monocle3
+  r-monocle3 \
+  r-r.utils
+
+# devtools::install_github("satijalab/seurat-wrappers")

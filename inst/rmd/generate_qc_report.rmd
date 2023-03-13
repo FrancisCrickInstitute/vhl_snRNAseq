@@ -11,7 +11,7 @@ output:
     toc: true
     toc_float: true
     toc_collapsed: true
-    toc_depth: 3
+    toc_depth: 4
     number_sections: true
     theme: lumen
 ---
@@ -21,11 +21,34 @@ library(devtools)
 load_all()
 ```
 
+`r if (testing == T) {"# Test run! {-}" }`
+
 ```{r testing, include = testing == T, eval = testing == T}
-args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/20230226_223350/args_for_generate_qc_report.R") 
-args$parse_dir <- paste0(here::here(), "/../parse_pipeline/") 
-out <- list(base = paste0(here::here(), "/out/test/"))
-sample_subset <- c("N090_V124A", "N090_V127")
+args <- list(
+  parse_dir = paste0(get_base_dir(), "parse_pipeline/"),
+  experiment = "221202_A01366_0326_AHHTTWDMXY",
+  genome = "hg38",
+  sublibrary = "SHE5052A9_S101",
+  parse_analysis_subdir = "all-well/DGE_filtered/",
+  remove_doublets = T,
+  do_filtering = T,
+  min_nuclei_per_gene = 5,
+  min_nCount_RNA = 300,
+  max_nCount_RNA = 10000,
+  min_nFeature_RNA = 200,
+  max_nFeature_RNA = 10000,
+  max_percent_mito = 15,
+  final_clustering_resolution = 0.3,
+  do_integration = F,
+  sample_subset = c("N090_V124A", "N090_V127"),
+  testing = T,
+  rerun = F
+)
+out <- list(
+  base = "out/test/",
+  cache = "out/test/cache/",
+  fig = "out/test/figures/"
+)
 ```
 
 # Run info {-}
@@ -34,9 +57,13 @@ sample_subset <- c("N090_V124A", "N090_V127")
 knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(paste, collapse = ", ") %>% unlist))
 ```
 
-Output files will be saved to `r out$base`.
+# Output {-}
 
-Figures will be saved to `r out$base`qc_report_files/figure-html/.
+Output files will be saved to **`r out$base`**.
+
+Figures will be saved to **`r out$base`qc_report_files/figure-html/**.
+
+Intermediate objects will be cached to **`r out$cache`**.
 
 ```{r initialise, include = F}
 # load args to global env
@@ -84,6 +111,7 @@ statistics <-
 
 # chunk setup
 knitr::opts_chunk$set(fig.align = "center",
+                      cache.path = out$cache,
                       dpi = 300)
 ```
 
@@ -112,7 +140,7 @@ seu <- xfun::cache_rds({
     groupings,
     statistics
   )
-}, file = "seu.rds", dir = out$base)
+}, file = "seu.rds", rerun = rerun)
 ```
 
 ```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F, fig.cap = "Plot of nuclei per sample"}
@@ -169,7 +197,9 @@ The `remove_doublets` argument is set to **`r remove_doublets`**.
 `r if (remove_doublets == F) {"A dummy column will be introduced, treating all nuclei as though they are singlets."}`
 
 ```{r identify_doublets, eval = remove_doublets == T, include = remove_doublets == T}
-seu <- annotate_doublets(seu)
+seu <- xfun::cache_rds({
+  annotate_doublets(seu)
+}, file = "seu_doublets.rds", rerun = rerun)
 ```
 
 ```{r ignore_doublets, eval = remove_doublets == F, include = remove_doublets == F}
@@ -331,7 +361,7 @@ p + ggplot2::scale_x_log10() + ggplot2::scale_y_log10()
 ```{r filter_nuclei, eval = do_filtering == T, include = do_filtering == T}
 seu <- xfun::cache_rds({
   subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
-}, file = "seu_filtered.rds", dir = out$base)
+}, file = "seu_filtered.rds", rerun = rerun)
 ```
 
 # Highest variable genes
@@ -408,7 +438,7 @@ Variables to regress out of the `SCTransform` residuals  (set by argument `vars_
 ```{r sctransform, eval = do_integration == F, include = do_integration == F, results = F, warning = F}
 seu <- xfun::cache_rds({
   Seurat::SCTransform(seu, vars.to.regress = vars_to_regress)
-}, file = "seu_transcformed.rds", dir = out$base)
+}, file = "seu_transcformed.rds", rerun = rerun)
 ```
 
 # Annotate cell cycle phases
@@ -526,7 +556,7 @@ seu <- xfun::cache_rds({
   seu <- Seurat::RunTSNE(seu)
   seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
   seu
-}, file = "seu_nonlin_dim_red.rds", dir = out$base)
+}, file = "seu_nonlin_dim_red.rds", rerun = rerun)
 ```
 
 ```{r samples_vs_reductions, class.source = 'fold-hide', fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
@@ -695,11 +725,11 @@ seu <- xfun::cache_rds({
   seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
   seu$cluster <- factor(seu$cluster, levels = paste(sort(as.integer(levels(seu$cluster)))))
   seu
-}, file = "seu_clustered.rds", dir = out$base)
+}, file = "seu_clustered.rds", rerun = rerun)
 ```
 
 ```{r final_clusters, class.source = 'fold-hide', fig.dim = c(5, 5), fig.cap = "Plot of final clusters"}
-final_clusters_umap <-
+seu_final_clusters_umap <-
   dittoSeq::dittoDimPlot(seu, "cluster", size = 0.5, xlab = NULL, ylab = NULL) +
     ggplot2::geom_label(
       data = seu@meta.data %>%
@@ -708,7 +738,7 @@ final_clusters_umap <-
       ggplot2::aes(x, y, label = cluster),
       size = 3, fill = 'white', alpha = 0.7, label.size = NA) +
   umap_void_theme
-final_clusters_umap
+seu_final_clusters_umap
 ```
 
 ```{r clusters_per_sample, class.source = 'fold-hide', fig.cap = "Plots of clusters per sample and samples per cluster"}
@@ -766,7 +796,7 @@ cds <- xfun::cache_rds({
   cds <- SeuratWrappers::as.cell_data_set(seu)
   SummarizedExperiment::rowData(cds)$gene_short_name <- row.names(SummarizedExperiment::rowData(cds))
   cds
-}, file = "cds.rds", dir = out$base)
+}, file = "cds.rds", rerun = rerun)
 ```
 
 ### Preprocessing and linear dimensionality reduction
@@ -784,7 +814,7 @@ Next, we perform non-linear dimensionality reduction of the data (UMAP).
 ```{r mon_umap, results = F, warning = F, message = F}
 cds <- xfun::cache_rds({
   monocle3::reduce_dimension(cds)
-}, file = "cds_nonlin_dim_red.rds", dir = out$base)
+}, file = "cds_nonlin_dim_red.rds", rerun = rerun)
 ```
 
 Plotting all different groupings of the data onto the reductions can help reveal batch effects. If certain experimental variables seem to strongly influence the grouping of cells, these effects can be removed. If so, use the `align_cds` step from [this tutorial](https://cole-trapnell-lab.github.io/monocle3/docs/clustering/#reduce-dimension).
@@ -837,13 +867,64 @@ We can now cluster the cells. Monocle3 does not require a user-defined clusterin
 ```{r mon_cluster_cells}
 cds <- xfun::cache_rds({
   monocle3::cluster_cells(cds)
-}, file = "cds_clustered.rds", dir = out$base) 
+}, file = "cds_clustered.rds", rerun = rerun) 
 ```
 
 ```{r mon_clusters_and_partitions, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by partition"}
 p <-
   monocle3::plot_cells(cds, label_cell_groups = F, show_trajectory_graph = F) +
   monocle3::plot_cells(cds, color_cells_by = "partition", group_cells_by = "partition", label_cell_groups = F, show_trajectory_graph = F)
+p
+```
+
+# Differential expression analysis
+
+Once cells have been clustered, we can isolate genes that are highly differentially expressed between the clusters. These cluster marker genes can 
+
+First, we identify the top genes that are most specifically expressed in each cluster and each partition. 
+
+```{r mon_cluster_markers, eval = T, results = F, warning = F}
+# monocle3::top_markers has a bug, so this function doesn't work:
+# marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", reference_cells = 1000)
+
+# using a debugged version of the function
+cluster_markers <- xfun::cache_rds({
+  top_markers_develop(cds, group_cells_by = "cluster")
+}, file = "cds_cluster_markers.rds", rerun = rerun)
+partition_markers <- xfun::cache_rds({
+  top_markers_develop(cds, group_cells_by = "partition")
+}, file = "cds_partition_markers.rds", rerun = rerun)
+
+# get top 3 markers per cluster
+top_specific_markers <- cluster_markers %>%
+  dplyr::as_tibble() %>%
+  dplyr::filter(fraction_expressing >= 0.10) %>%
+  dplyr::group_by(cell_group) %>%
+  dplyr::top_n(3, pseudo_R2) %>%
+  dplyr::arrange(desc(cell_group))
+top_specific_marker_ids <- unique(top_specific_markers %>% dplyr::pull(gene_id))
+```
+
+```{r mon_top_cluster_markers, eval = T, class.source = 'fold-hide', fig.dim = c(10, length(top_specific_marker_ids) / 4), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
+
+
+# monocle3::plot_genes_by_group has a bug, so this function doesn't work:
+# p <-
+#   monocle3::plot_genes_by_group(
+#     cds,
+#     markers = (top_specific_marker_ids),
+#     group_cells_by="cluster",
+#     ordering_type="maximal_on_diag",
+#     max.size=3)
+
+# using dittoSeq::dittoDotPlot instead
+p <-
+  dittoSeq::dittoDotPlot(cds, 
+                         top_specific_marker_ids, 
+                         group.by = "cluster", 
+                         x.labels.rotate = F) +
+  ggplot2::coord_flip() +
+  ggplot2::theme(text = ggplot2::element_text(size = 8))
 p
 ```
 
@@ -858,20 +939,22 @@ The package `SingleR` returns "the best annotation for each cell in a test datas
 Some annotations will contain very few nuclei. These are usually not of interest and clutter up plotting, so we remove annotations assigned to < 10 nuclei.
 
 ```{r singler_annots, message = F, warning = F}
-seu <- xfun::cache_rds({
+seu_singler <- xfun::cache_rds({
   human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
-  seu_singler <- SingleR::SingleR(
+  SingleR::SingleR(
     test = Seurat::GetAssayData(seu, slot = "data"),
     ref = human_primary_ref,
     labels = human_primary_ref$label.main
   )
+}, file = "seu_singler.rds", rerun = rerun)
+seu <- xfun::cache_rds({
   seu$singler_annot <- seu_singler %>%
         dplyr::as_tibble() %>%
         dplyr::group_by(labels) %>%
         dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
         dplyr::pull(singler_annot)
   seu
-}, file = "seu_auto_annotated.rds", dir = out$base)
+}, file = "seu_auto_annotated.rds", rerun = rerun)
 ```
 
 ```{r singler_annots_heatmap, class.source = 'fold-hide', fig.width = 10, fig.cap = "Heatmap of celltype annotation scores from SingleR"}
@@ -998,65 +1081,78 @@ p
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
+### `Monocle3` clusters
+
+```{r all_modules_heatmap, echo = FALSE, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
+gene_group_df <- 
+  markers %>%
+  purrr::map(purrr::map, purrr::map, dplyr::as_tibble) %>% 
+  purrr::map(purrr::map, dplyr::bind_rows, .id = "module") %>%
+  purrr::map(dplyr::bind_rows, .id = "source") %>%
+  dplyr::bind_rows(.id = "study") %>%
+  dplyr::mutate(chunk_name = paste(gsub(".*\\_", "", study), source, module)) %>%
+  dplyr::select(value, chunk_name)
+cell_group_df <- 
+  tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)), cell_group = monocle3::clusters(cds))
+agg_mat <- 
+  monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df)
+p <- 
+  pheatmap::pheatmap(agg_mat, scale="column", clustering_method="ward.D2")
+p
+```
+
 ```{r, echo = FALSE, warning = F, message = F, results = 'asis'} 
+# testing: # sc_type="cds";study="Annika";source="literature";ct="ccrcc"
+sc_objects <- list(cds = cds, seu = seu)
+
 to_knit <- c()
-for(study in names(markers)) {
-  info <- stringr::str_split(study, "_")[[1]]
-  if (length(info) == 3) {
-    author <- info[3]
-    for_heading <- paste0(author, " et al. (", info[2], ")")
-    for_text <-  paste0("[", for_heading, "](https://pubmed.ncbi.nlm.nih.gov/", info[1], ")")
-  } else {
-    author <- info
-    for_heading <- for_text <- info
-  }
+for(sc_type in names(sc_objects)) {
+  if (sc_type == "seu") { to_knit <- c(to_knit, paste0("### `Seurat` clusters")) }
   
-  heading <- paste("###", for_heading, "markers\n")
-  to_knit <- c(to_knit, heading)
-  
-  for(source in names(markers[[study]])) {
-    avail_markers <- get_available_markers(seu, markers[[study]][[source]])
-    subheading <- paste0("**", length(unlist(markers[[study]][[source]])), 
-                         "** markers sourced from **", source, "** by ", for_text, ".\n",
-                         "**", length(unlist(avail_markers)), "** markers are present in the dataset.\n")
+  for(study in names(markers)) {
+    author <- gsub(".*\\_", "", study)
+    info <- stringr::str_split(study, "_")[[1]]
+    
+    if (all(info == author)) {
+      for_subheading <- for_text <- info
+    } else {
+      for_subheading <- paste0(author, " et al. (", info[2], ")")
+      for_text <-  paste0("[", for_subheading, "](https://pubmed.ncbi.nlm.nih.gov/", info[1], ")")
+    }
+    subheading <- paste("####", for_subheading, "markers\n")
     to_knit <- c(to_knit, subheading)
     
-    seu <- Seurat::AddModuleScore(seu, features = avail_markers, name = )
-    
-    for(ct in names(avail_markers)) {
-      chunk_name <- paste(author, substr(source, 1, 3), ct) %>%
-        janitor::make_clean_names()
-      subsubheading <- paste0("#### Population: **", ct, "**\n")
-      ct_markers <- avail_markers[[ct]]
-      n_ct_markers <- length(ct_markers)
+    for(source in names(markers[[study]])) {
+      avail_markers <- get_available_markers(sc_objects[[sc_type]], markers[[study]][[source]])
+      subsubheading <- paste0("**", length(unlist(markers[[study]][[source]])), 
+                           "** markers sourced from **", source, "** by ", for_text, ".\n",
+                           "**", length(unlist(avail_markers)), "** markers are present in the dataset.\n")
       to_knit <- c(to_knit, subsubheading)
       
-      if(n_ct_markers > 1) {
-        knit <- knitr::knit_child(text = c(
-          '',
-          paste0('```{r ', chunk_name, '_module, echo = F, warning = F, message = F, fig.dim = c(10,5)}'),
-          'seu <- Seurat::AddModuleScore(seu, features = list(ct_markers), name = chunk_name)',
-          paste0('p <- final_clusters_umap + dittoSeq::dittoDimPlot(seu, paste0(chunk_name, "1"), size = 0.5, main = "', ct, ' module score") + umap_void_theme'),
-          'p',
-          '```',
-          ''
-        ), envir = environment(), quiet = TRUE)
-        to_knit <- c(to_knit, knit)
-      } 
+      chunk_name <- paste(sc_type, author, substr(source, 1, 3)) %>% janitor::make_clean_names()
+      knit <- plot_cds_marker_modules(chunk_name, cds)
+      knit <- knitr::knit_child(text = knit, envir = environment(), quiet = TRUE)
+      to_knit <- c(to_knit, knit)
       
-      if(n_ct_markers < 50) {
-        knit <- knitr::knit_child(text = c(
-          '',
-          paste0('```{r ', chunk_name, ', echo = F, warning = F, message = F, fig.dim = get_fig_dims((n_ct_markers + 1), n_cols = 4, height_to_width_ratio = 1.2)}'),
-          'p <- plot_markers_on_umap(seu, ml = ct_markers, final_clusters_umap, umap_void_theme)',
-          'p',
-          '```',
-          ''
-        ), envir = environment(), quiet = TRUE)
+      for(ct in names(avail_markers)) {
+        chunk_name <- paste(sc_type, author, substr(source, 1, 3), ct) %>% janitor::make_clean_names()
+        subsubsubheading <- paste0("##### Population: **", ct, "**\n")
+        ct_markers <- avail_markers[[ct]]
+        n_ct_markers <- length(ct_markers)
+        to_knit <- c(to_knit, subsubsubheading)
+        
+        if (sc_type == "seu") {
+          knit <- 
+            plot_seu_markers(chunk_name,
+                             ct,
+                             n_ct_markers,
+                             seu)
+        } else if (sc_type == "cds") {
+          knit <-
+            plot_cds_markers(chunk_name)
+        }
+        knit <- knitr::knit_child(text = knit, envir = environment(), quiet = TRUE)
         to_knit <- c(to_knit, knit)
-      } else { 
-        to_knit <- c(to_knit,
-                     paste(n_ct_markers, "markers in this set - too many to print!\n"))
       }
     }
   }
@@ -1103,48 +1199,6 @@ system(paste("mv output/*", scevan_dir, "; rm -Rf output"))
 
 # save results
 saveRDS(results, paste0(scevan_dir, "/results.rds"))
-```
-
-# Differential expression analysis
-
-Once cells have been clustered, we can isolate genes that are highly differentially expressed between the clusters. These cluster marker genes can 
-
-First, we identify the top genes that are most specifically expressed in each cluster and each partition. 
-
-```{r mon_cluster_markers, results = F, warning = F}
-# marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", 
-#                                          reference_cells = 1000)
-cluster_markers <- top_markers_debugged(cds, group_cells_by = "cluster")
-partition_markers <- top_markers_debugged(cds, group_cells_by = "partition")
-
-# save top markers
-readr::write_tsv(marker_test_res, paste0(out$base, "mon_top_markers.tsv"))
-```
-
-```{r mon_top_cluster_markers, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
-# get top 3 markers per cluster
-top_specific_markers <- marker_test_res %>%
-  dplyr::filter(fraction_expressing >= 0.10) %>%
-  dplyr::group_by(cell_group) %>%
-  dplyr::top_n(3, pseudo_R2) %>%
-  dplyr::arrange(cell_group)
-top_specific_marker_ids <- unique(top_specific_markers %>% dplyr::pull(gene_id))
-
-# monocle3::plot_genes_by_group has a bug, so this function doesn't work:
-# p <-
-#   monocle3::plot_genes_by_group(
-#     cds,
-#     markers = (top_specific_marker_ids),
-#     group_cells_by="cluster",
-#     ordering_type="maximal_on_diag",
-#     max.size=3)
-
-# using dittoSeq::dittoDotPlot instead
-seu$cds_cluster <- cds@clusters$UMAP$clusters
-dittoSeq::dittoDotPlot(seu, 
-                       top_specific_marker_ids, 
-                       group.by = "cds_cluster") +
-  ggplot2::theme(text = ggplot2::element_text(size = 6))
 ```
 
 # Single-cell trajectories

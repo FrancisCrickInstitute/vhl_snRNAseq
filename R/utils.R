@@ -229,10 +229,10 @@ get_available_markers <- function(seu, marker_list) {
 }
 
 # Plot all markers in the marker list (marker_list is a named list of marker modules)
-plot_markers_on_umap <- function(seu, ml, final_clusters_umap, umap_void_theme) {
+plot_markers_on_umap <- function(seu, ml, seu_final_clusters_umap, umap_void_theme) {
   # list of plots
   p <- list()
-  p[["clusters"]] <- final_clusters_umap
+  p[["clusters"]] <- seu_final_clusters_umap
   purrr::walk(ml, function(g) {
     p[[g]] <<-
       dittoSeq::dittoDimPlot(seu, g,
@@ -257,11 +257,81 @@ plot_markers_on_umap <- function(seu, ml, final_clusters_umap, umap_void_theme) 
 
 
 # Calculate plot height for grids
-get_fig_dims <- function(n_plots, n_cols = 3, grid_width = 10, height_to_width_ratio = 1) {
-  # n rows in the grid
-  n_rows <- floor((n_plots + n_cols - 1) / n_cols)
-  # get height proportionate to width
-  grid_height <- (grid_width / n_cols) * n_rows * height_to_width_ratio
+get_fig_dims <- function(n_plots, n_cols = NULL, grid_width = 10, height_to_width_ratio = 1) {
+  # get dims
+  dims <- ggplot2::wrap_dims(n_plots, n_cols)
+  # get scale
+  scale <- grid_width / dims[1]
+  # get height
+  grid_height <- (dims[2] * scale) * height_to_width_ratio
   # return dims
   c(grid_width, grid_height)
+}
+
+# Function to plot markers for seu
+plot_seu_markers <- function(chunk_name,
+                             ct,
+                             n_ct_markers,
+                             seu) {
+  knit1 <- c()
+  if(n_ct_markers > 1) {
+    knit1 <- c(knit1,
+      '',
+      paste0('```{r ', chunk_name, '_module, echo = F, warning = F, message = F, fig.dim = c(10,5)}'),
+      'seu <- Seurat::AddModuleScore(seu, features = list(ct_markers), name = chunk_name)',
+      paste0('p <- seu_final_clusters_umap + dittoSeq::dittoDimPlot(seu, paste0(chunk_name, "1"), size = 0.5, main = "', ct, ' module score") + umap_void_theme'),
+      'p',
+      '```',
+      ''
+    )
+  }
+  if(n_ct_markers < 50) {
+    knit2 <- c(
+      '',
+      paste0('```{r ', chunk_name, ', echo = F, warning = F, message = F, fig.dim = get_fig_dims((n_ct_markers + 1), n_cols = 4, height_to_width_ratio = 1.2)}'),
+      'p <- plot_markers_on_umap(seu, ml = ct_markers, seu_final_clusters_umap, umap_void_theme)',
+      'p',
+      '```',
+      ''
+    )
+  } else {
+    knit2 <- paste(n_ct_markers, "markers in this set - too many to print!\n")
+  }
+  knit <- c(knit1, knit2)
+  knit
+}
+
+# Function to plot marker modules for cds
+plot_cds_marker_modules <- function(chunk_name,
+                                    cds) {
+  knit <- c()
+  for(group in c("clusters", "partitions")) {
+    if (dplyr::n_distinct(cds@clusters$UMAP[[group]]) > 1) {
+      knit <- c(knit,
+                 '',
+                 paste0('```{r ', chunk_name, '_', group, 'module_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 5)}'),
+                 'gene_group_df <- avail_markers %>% purrr::map(dplyr::as_tibble) %>% dplyr::bind_rows(.id = "group") %>% dplyr::select(value, group)',
+                 paste0('cell_group_df <- tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)), cell_group = monocle3::', group, '(cds))'),
+                 'agg_mat <- monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df)',
+                 'p <- pheatmap::pheatmap(agg_mat, scale="column", clustering_method="ward.D2")',
+                 'p',
+                 '```',
+                 ''
+      )
+    }
+  }
+  knit
+}
+
+# Function to plot markers for cds
+plot_cds_markers <- function(chunk_name, n_ct_markers) {
+  knit <- c(
+    '',
+    paste0('```{r ', chunk_name, ', echo = F, warning = F, message = F, fig.dim = get_fig_dims(n_ct_markers)}'),
+    'p <- monocle3::plot_cells(cds, genes = c(avail_markers[[ct]]), show_trajectory_graph = FALSE, label_cell_groups = FALSE, label_leaves = FALSE)',
+    'p',
+    '```',
+    ''
+  )
+  knit
 }

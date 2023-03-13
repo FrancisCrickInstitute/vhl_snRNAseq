@@ -9,4 +9,4 @@ cd $wd
 
 # load conda env
 ml purge
-conda activate vhl
+conda activate vhl2
