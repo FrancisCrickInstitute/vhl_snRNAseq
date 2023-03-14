@@ -118,6 +118,10 @@ load_parse_to_seurat <-
       seu <- seu_ls[[1]]
     }
 
+    # remove genes with no counts
+    counts <- as.matrix(seu@assays$RNA@counts)
+    seu <- subset(seu, features = rownames(counts[rowSums(counts) > 0, ]))
+
     return(seu)
   }
 
