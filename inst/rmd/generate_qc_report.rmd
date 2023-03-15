@@ -952,7 +952,7 @@ cds <- xfun::cache_rds({
 }, file = "cds.rds", rerun = rerun)
 ```
 
-### Preprocessing and linear dimensionality reduction
+## Preprocessing and linear dimensionality reduction
 
 First, we perform normalisation and principal component analysis. We use the previously decided dimensionality of the data (**`r final_n_dims`**) from the `Seurat` section.
 
@@ -960,7 +960,7 @@ First, we perform normalisation and principal component analysis. We use the pre
 cds <- monocle3::preprocess_cds(cds, num_dim = final_n_dims)
 ```
 
-### Non-linear dimensionality reduction 
+## Non-linear dimensionality reduction 
 
 Next, we perform non-linear dimensionality reduction of the data (UMAP). 
 
@@ -977,7 +977,8 @@ Plotting all different groupings of the data onto the reductions can help reveal
 avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colData(cds))]
 ```
 
-```{r mon_groupings_vs_reductions, class.source = 'fold-hide', fig.dim = get_fig_dims(length(avail_groupings) * (length(cds@reduce_dim_aux) + 1), n_cols = length(cds@reduce_dim_aux) + 1), fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
+```{r mon_groupings_vs_reductions, class.source = 'fold-hide', fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
+# fig.dim = get_fig_dims(length(avail_groupings) * (length(cds@reduce_dim_aux) + 1), n_cols = length(cds@reduce_dim_aux) + 1), 
 # plot all groupings vs all reductions
 groupings_vs_reductions <- list()
 purrr::walk(avail_groupings, function(grouping) {
@@ -1013,7 +1014,7 @@ p <-
 p
 ```
 
-### Clustering
+## Clustering
 
 `Monocle3` offers an unsupervised clustering function. This function also separates cells into superclusters, called partitions. These represent higher order communities within the dataset, allowing the different resolutions to coexist for downstream analysis.
 
@@ -1046,7 +1047,7 @@ p <-
 p
 ```
 
-# Differential expression analysis
+## Differential expression analysis
 
 Once cells have been clustered, we can isolate genes that are highly differentially expressed between the clusters. These cluster marker genes can 
 
@@ -1109,11 +1110,11 @@ p
 
 ## Manual celltype annotation using curated literature markers
 
-Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
-
-```{r avail_markers, echo = F, warning = F, message = F}
+```{r cds_avail_markers, echo = F}
 avail_markers <- get_available_markers(cds, markers)
 ```
+
+Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
 ```{r all_modules_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 df <- 
@@ -1159,60 +1160,7 @@ p
 ```
 
 ```{r, echo = FALSE, warning = F, message = F, results = 'asis'} 
-# testing: # sc_type="cds";study="Annika";source="literature";ct="ccrcc"
-sc_objects <- list(cds = cds, seu = seu)
-
-to_knit <- c()
-for(sc_type in names(sc_objects)) {
-  if (sc_type == "seu") { to_knit <- c(to_knit, paste0("### `Seurat` clusters")) }
-  
-  for(study in names(avail_markers)) {
-    author <- gsub(".*\\_", "", study)
-    info <- stringr::str_split(study, "_")[[1]]
-    
-    if (all(info == author)) {
-      for_subheading <- for_text <- info
-    } else {
-      for_subheading <- paste0(author, " et al. (", info[2], ")")
-      for_text <-  paste0("[", for_subheading, "](https://pubmed.ncbi.nlm.nih.gov/", info[1], ")")
-    }
-    subheading <- paste("####", for_subheading, "markers\n")
-    to_knit <- c(to_knit, subheading)
-    
-    for(source in names(avail_markers[[study]])) {
-      subsubheading <- paste0("**", length(unlist(markers[[study]][[source]])), 
-                           "** markers sourced from **", source, "** by ", for_text, ".\n",
-                           "**", length(unlist(avail_markers[[study]][[source]])), "** markers are present in the dataset.\n")
-      to_knit <- c(to_knit, subsubheading)
-      chunk_name <- paste(sc_type, author, substr(source, 1, 3)) %>% janitor::make_clean_names()
-      
-      if (sc_type == "cds") {
-        knit <- plot_cds_marker_modules(chunk_name, cds)
-        knit <- knitr::knit_child(text = knit, envir = environment(), quiet = TRUE)
-        to_knit <- c(to_knit, knit)
-      }
-      
-      for(ct in names(avail_markers[[study]][[source]])) {
-        chunk_name <- paste(sc_type, author, substr(source, 1, 3), ct) %>% janitor::make_clean_names()
-        subsubsubheading <- paste0("##### Population: **", ct, "**\n")
-        ct_markers <- avail_markers[[study]][[source]][[ct]]
-        n_ct_markers <- length(ct_markers)
-        to_knit <- c(to_knit, subsubsubheading)
-        
-        if (sc_type == "seu") {
-          knit <- 
-            plot_seu_markers(chunk_name, ct, n_ct_markers, seu)
-        } else if (sc_type == "cds") {
-          knit <-
-            plot_cds_markers(chunk_name, n_ct_markers)
-        }
-        knit <- knitr::knit_child(text = knit, envir = environment(), quiet = TRUE)
-        to_knit <- c(to_knit, knit)
-      }
-    }
-  }
-}
-cat(unlist(to_knit), sep = '\n')
+plot_markers_on_object(object = cds, object_type = "Monocle3")
 ```
 
 ## Final celltype annotations
@@ -1223,6 +1171,10 @@ cat(unlist(to_knit), sep = '\n')
 # truncate document if no final celltype annotations have been provided
 knitr::knit_exit()
 ```
+
+## inferCNV
+
+We annotate endothelial cells as matched normal and use this to infer copy number variants in the tumour population. 
 
 # Single cell trajectory analysis
 

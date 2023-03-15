@@ -29,6 +29,7 @@ conda create -n vhl2 -c conda-forge -c bioconda -c r \
   r-janitor \
   r-bookdown \
   r-monocle3 \
-  r-r.utils
+  r-r.utils \
+  bioconductor-infercnv
 
 # devtools::install_github("satijalab/seurat-wrappers")
