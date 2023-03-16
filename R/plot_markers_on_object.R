@@ -94,12 +94,12 @@ plot_cds_marker_modules <- function(chunk_name,
   if (dplyr::n_distinct(cds@clusters$UMAP[[group]]) > 1) {
     knit <- c(knit,
               '',
-              paste0('```{r ', chunk_name, '_', group, '_module_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 5)}'),
+              paste0('```{r ', chunk_name, '_', group, '_module_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, length(unlist(avail_markers[[study]][[source]])) / 5)}'),
               'annotations <- avail_markers[[study]][[source]] %>% purrr::map(dplyr::as_tibble) %>% dplyr::bind_rows(.id = "annotation") %>% dplyr::group_by(value) %>% dplyr::summarise(annotation = paste(annotation, collapse = ", ")) %>% dplyr::arrange(annotation) %>% tibble::column_to_rownames("value")',
               'annotation_cols <- list(annotation = c(dittoSeq::dittoColors()[1:dplyr::n_distinct(annotations$annotation)]) %>% setNames(unique(annotations$annotation)))',
               paste0('cell_group_df <- tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)), cell_group = monocle3::', group, '(cds))'),
               'agg_mat <- monocle3::aggregate_gene_expression(cds[rownames(annotations)], cell_group_df = cell_group_df)',
-              'p <- pheatmap::pheatmap(agg_mat, scale = "row", cluster_rows = F, clustering_method = "ward.D2", annotation_row = annotations, annotation_colors = annotation_cols, annotation_names_row = F, gaps_row = which(annotations$annotation != dplyr::lag(annotations$annotation)) - 1, fontsize = 3)',
+              'p <- pheatmap::pheatmap(agg_mat, scale = "row", cluster_rows = F, clustering_method = "ward.D2", annotation_row = annotations, annotation_colors = annotation_cols, annotation_names_row = F, gaps_row = which(annotations$annotation != dplyr::lag(annotations$annotation)) - 1, fontsize = 8)',
               'p',
               '```',
               ''
@@ -132,7 +132,7 @@ get_subheading <- function(study) {
   author <- get_author(study)
   info <- stringr::str_split(study, "_")[[1]]
   paste(
-    "####",
+    "\n####",
     ifelse(
       all(info == author),
       author, paste0(author, " et al. (", info[2], ")")),

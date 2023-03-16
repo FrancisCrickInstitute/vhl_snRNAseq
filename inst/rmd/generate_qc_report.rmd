@@ -19,6 +19,7 @@ output:
 ```{r load_vhl_package, include = F}
 library(devtools)
 load_all()
+testing=T
 ```
 
 `r if (testing == T) {"# Test run! {-}" }`
@@ -38,32 +39,20 @@ args <- list(
   min_nFeature_RNA = 200,
   max_nFeature_RNA = 10000,
   max_percent_mito = 15,
+  vars_to_regress = c("percent_mito", "nCount_RNA"),
+  n_dims = NULL,
   final_clustering_resolution = 0.3,
   do_integration = F,
   sample_subset = c("N090_V124A", "N090_V127"),
+  final_cluster_annotations = NULL,
   testing = T,
   rerun = F
 )
 out <- list(
   base = "out/test/",
-  cache = "out/test/cache/",
-  fig = "out/test/figures/"
+  cache = "out/test/cache/"
 )
 ```
-
-# Run info {-}
-
-```{r args, echo = F}
-knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(paste, collapse = ", ") %>% unlist))
-```
-
-# Output {-}
-
-Output files will be saved to **`r out$base`**.
-
-Figures will be saved to **`r out$base`qc_report_files/figure-html/**.
-
-Intermediate objects will be cached to **`r out$cache`**.
 
 ```{r initialise, include = F}
 # load args to global env
@@ -80,14 +69,6 @@ library(monocle3)
 # set ggplot theme
 ggplot2::theme_set(ggplot2::theme_bw())
 ggplot2::theme_update(legend.text = ggplot2::element_text(size = 7))
-ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()),
-                      ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
-umap_void_theme <-
-    ggplot2::theme(axis.text = ggplot2::element_blank(),
-                   axis.title = ggplot2::element_blank(),
-                   axis.ticks = ggplot2::element_blank(),
-                   legend.position = "none",
-                   plot.margin = ggplot2::unit(c(2,2,2,2), "pt"))
 
 # set sample groupings to check at the clustering stage
 groupings <- 
@@ -115,13 +96,26 @@ knitr::opts_chunk$set(fig.align = "center",
                       dpi = 300)
 ```
 
-# Pre-processing
+# Run info {-}
 
-## Load data and filter genes
+```{r args, echo = F}
+knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(paste, collapse = ", ") %>% unlist))
+```
+
+# Output info {-}
+
+Output files will be saved to **`r out$base`**.
+
+Figures will be saved to **`r out$base`qc_report_files/figure-html/**.
+
+Intermediate objects will be cached to **`r out$cache`**.
+
+# `Seurat` pre-processing
+
+## Load data and apply gene-level filter
 
 Load Parse Biosciences split-pipe pipeline output as a Seurat object with no cut-offs, remove any missing samples, add sample metadata, add summary statistics, and optionally subset samples. Then filter nuclei per gene. 
-
-Gene-level filtering is also performed at this point, based on the `min_nuclei_per_gene` argument. Genes that are present in very few nuclei of the dataset (e.g., <3) are uninformative and unlikely to help in differentiating between groups of nuclei. In general, most genes removed by this filtering step will be those not detected in any nuclei, which will help to trim the size of the object. 
+Gene-level filtering is performed at this point, based on the `min_nuclei_per_gene` argument. Genes that are present in very few nuclei of the dataset (e.g., <3) are uninformative and unlikely to help in differentiating between groups of nuclei. In general, most genes removed by this filtering step will be those not detected in any nuclei, which will help to trim the size of the object. Additionally, genes are removed that have entries in all nuclei but whose entries are all zero. 
 
 The minimum number of nuclei per gene is set to **`r min_nuclei_per_gene`**.
 
@@ -165,9 +159,11 @@ p <-
 p
 ```
 
-- `fraction_tscp_in_cells` - Number of unique transcripts associated with barcodes labeled as "cells" divided by the number of reads associated with barcodes labeled as "background" in the barcode-rank plot.
-- `median_genes_per_cell` - Median number of genes detected per cell.
 - `median_tscp_per_cell` - Median number of transcripts detected per cell.
+- `median_genes_per_cell` - Median number of genes detected per cell.
+- `fraction_tscp_in_cells` - Number of unique transcripts associated with barcodes labeled as "cells" divided by the number of reads associated with barcodes labeled as "background" in the barcode-rank plot.
+- `cell_tscp_cutoff` -  Minimum number of transcripts required for barcode to be considered a "cell". Moreover, all barcodes containing "x" number transcripts and greater will be considered a cell, and anything less will be considered background. 
+- `valid_barcode_fraction` - Fraction of starting (fastq) reads that contain a valid set of barcodes. Barcodes are corrected together (as a triple), allowing for multiple differences from the ideal sequences (Mismatches and/or InDels up to edit distance 2 are considered for each barcode).
 
 ## Filter nuclei
 
@@ -362,14 +358,19 @@ p + ggplot2::scale_x_log10() + ggplot2::scale_y_log10()
 
 ```{r filter_nuclei, eval = do_filtering == T, include = do_filtering == T}
 seu_filtered <- xfun::cache_rds({
-  subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
+  # remove failing nuclei 
+  seu <- subset(seu, cells = unique(dplyr::filter(seu@misc$nucleus_filtering, pass)$nucleus))
+  # remove genes with no counts
+  counts <- as.matrix(seu@assays$RNA@counts)
+  seu <- subset(seu, features = rownames(counts[rowSums(counts) > 0, ]))
+  seu
 }, file = "seu_filtered.rds", rerun = rerun)
 seu <- seu_filtered
 ```
 
 # `Seurat` processing
 
-## Highest variable genes
+## Find highest variable genes
 
 Find the most highly variable genes (HVGs) across samples.
 
@@ -458,14 +459,16 @@ seu <- Seurat::CellCycleScoring(
 )
 ```
 
-## Dimensionality reduction
+## Defining dimensionality
 
-Dimensionality reduction is performed to isolate the strongest signals and to remove background noise. 
+Dimensionality reduction is performed to isolate the strongest signals and to remove background noise. First, we must perform linear dimensionality reduction and then decide the dimensionality of the data.
 
 ### Linear dimensionality reduction (PCA)
 
 ```{r run_pca}
-seu <- Seurat::RunPCA(seu)
+seu <- xfun::cache_rds({
+  Seurat::RunPCA(seu)
+}, file = "seu_pca.rds", rerun = rerun)
 ```
 
 ```{r pc1_vs_pc2_plot, class.source = 'fold-hide', fig.cap = "Plot of PC1 vs PC2, coloured by sample"}
@@ -497,7 +500,7 @@ p
 
 The dimensionality of the dataset to use for downstream analysis must be decided. This is the number of principal components believed to capture the majority of true biological signal in the dataset. Using too many PCs usually does not affect the result too much, while including too few PCs can be detrimental, as meaningful biological variation may be lost. Therefore, it is better to be overgenerous when defining the dimensionality of the data than to underestimate it.
 
-The dimensionality can be decided by consulting the elbow plot (see below) and manually picking a value (set by argument `n_dims`) or it can be calculated using the `intrinsicDimensionality` package. 
+The dimensionality can be decided by consulting the elbow plot (see below) and manually picking a value (set by argument `n_dims`) or it can be calculated using the `intrinsicDimension` package. 
 
 ```{r usr_n_dims_msg, echo = F, eval = !is.null(n_dims), results = 'asis'}
 cat("### Manually\n")
@@ -552,57 +555,67 @@ p <-
 p
 ```
 
-### Non-linear dimensionality reduction (UMAP, tSNE)
+# `Monocle3` processing
 
-Perform non-linear dimensionality reduction of the dataset. 
+The `Monocle3` package provides alternative processing approaches for single cell data.   
 
-```{r run_nonlin_dim_red, warning = F, message = F}
-seu <- xfun::cache_rds({
-  seu <- Seurat::RunTSNE(seu)
-  seu <- Seurat::RunUMAP(seu, dims = 1:final_n_dims)
-  seu
-}, file = "seu_nonlin_dim_red.rds", rerun = rerun)
+First, we must convert the data to Monocle3's proprietary `cell_data_set` object and fill in gene names and cell cycle scores.
+
+```{r seu_to_cds, results = F, warning = F}
+cds <- xfun::cache_rds({
+  cds <- SeuratWrappers::as.cell_data_set(seu_filtered, assay = "RNA")
+  SummarizedExperiment::rowData(cds)$gene_short_name <- 
+    row.names(SummarizedExperiment::rowData(cds))
+  SummarizedExperiment::colData(cds)$Phase <- 
+    seu$Phase
+  cds
+}, file = "cds.rds", rerun = rerun)
 ```
 
-```{r samples_vs_reductions, class.source = 'fold-hide', fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP and tSNE, coloured by sample"}
-p <-
-  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F,
-                         legend.show = F) +
-  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "tsne", raster = F) 
-p
+## Re-pre-processing and linear dimensionality reduction
+
+First, we perform normalisation and principal component analysis again. We use the previously decided dimensionality of the data (**`r final_n_dims`**) from the `Seurat` section.
+
+```{r preprocessing}
+cds <- xfun::cache_rds({
+  monocle3::preprocess_cds(cds, num_dim = final_n_dims)
+}, file = "cds_lin_dim_red.rds", rerun = rerun)
 ```
 
-```{r umap_split_by_sample, class.source = 'fold-hide', fig.dim = get_fig_dims(dplyr::n_distinct(seu$nih_pid), n_cols = min(dplyr::n_distinct(seu$nih_pid), 3)), fig.cap = "Plot of UMAP, split by patient and coloured by sample"}
-p <-
-  dittoSeq::dittoDimPlot(seu, "sample", reduction.use = "umap", raster = F, legend.show = F, split.by = "nih_pid", split.ncol = 3)
-p
+## Non-linear dimensionality reduction 
+
+Next, we perform non-linear dimensionality reduction of the data (UMAP). 
+
+```{r nonlin_dim_redu, results = F, warning = F, message = F}
+cds <- xfun::cache_rds({
+  monocle3::reduce_dimension(cds, preprocess_method = "PCA")
+}, file = "cds_nonlin_dim_red.rds", rerun = rerun)
 ```
 
-```{r seu_avail_groupings, include = F}
+Plotting all different groupings of the data onto the reductions can help reveal batch effects. If certain experimental variables seem to strongly influence the grouping of cells, these effects can be removed. If so, use the `align_cds` step from [this tutorial](https://cole-trapnell-lab.github.io/monocle3/docs/clustering/#reduce-dimension).
+
+```{r avail_groupings, include = F}
 # amend groupings
-avail_groupings <- groupings[groupings %in% colnames(seu@meta.data)]
+avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colData(cds))]
 ```
 
-```{r seu_groupings_vs_reductions, class.source = 'fold-hide', fig.dim = get_fig_dims(length(avail_groupings) * (length(Seurat::Reductions(seu)) + 1), n_cols = 4, height_to_width_ratio = 1.2), fig.cap = "Plot of all Seurat dimensionality reductions, coloured by groupings"}
+```{r groupings_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, 30), fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
+# fig.dim = get_fig_dims(length(avail_groupings) * (length(cds@reduce_dim_aux) + 1), n_cols = length(cds@reduce_dim_aux) + 1), 
 # plot all groupings vs all reductions
 groupings_vs_reductions <- list()
 purrr::walk(avail_groupings, function(grouping) {
-  purrr::walk(Seurat::Reductions(seu), function(redu) {
+  purrr::walk(names(cds@reduce_dim_aux), function(redu) {
     title <- paste0(redu, "_vs_", grouping)
     p <- 
-      dittoSeq::dittoDimPlot(
-      seu,
-      grouping,
-      reduction.use = redu,
-      size = 0.5,
-      raster = F,
-      show.axes.numbers = F,
-      show.grid.lines = F,
-      main = gsub("_", " ", title)
-    )
+      monocle3::plot_cells(
+        cds, 
+        reduction_method = redu, 
+        color_cells_by = grouping,
+        show_trajectory_graph = F, 
+        label_cell_groups = F)
     groupings_vs_reductions[[paste0(grouping, "_legend")]] <<-
       lemon::g_legend(p)
-    groupings_vs_reductions[[title]] <<-
+    groupings_vs_reductions[[title]] <<- 
       p + ggplot2::theme(legend.position = "none")
   })
 })
@@ -611,11 +624,11 @@ p <-
   gridExtra::marrangeGrob(
     grobs = groupings_vs_reductions,
     nrow = length(avail_groupings),
-    ncol = length(Seurat::Reductions(seu)),
+    ncol = length(cds@reduce_dim_aux) + 1,
     layout_matrix = matrix(
       1:length(groupings_vs_reductions),
       length(avail_groupings),
-      length(Seurat::Reductions(seu)) + 1,
+      length(cds@reduce_dim_aux) + 1,
       TRUE
     ),
     top = NULL
@@ -641,146 +654,277 @@ Setting a **low clustering resolution** will produce fewer clusters, reflect the
 
 **Higher clustering resolutions** will result in more, increasingly granular clusters and can reveal celltype-level groups. In can also reveal new / rare celltypes that are hidden at lower resolutions. Setting the clustering resolution too high, however, can produce meaningless groups and lead to overfitting. 
 
-### Find neighbours
+`Monocle3` offers an unsupervised clustering function. This function also separates cells into superclusters, called partitions. These represent higher order communities within the dataset, allowing the different resolutions to coexist for downstream analysis.
 
-The first step is to compute the `k.param` nearest neighbours for a given dataset. This step constructs a shared nearest neighbours (SNN) graph from euclidean distances between nuclei in PCA space, and then computes edge weights between each pair of nuclei based on their Jaccard similarity (the shared overlap of their local neighborhoods).
+From **`Monocle3::cluster_cells` vignette**
 
-```{r find_neighbours}
-seu <- Seurat::FindNeighbors(seu, dims = 1:final_n_dims)
+> *Unsupervised clustering of cells is a common step in many single-cell expression workflows. In an experiment containing a mixture of cell types, each cluster might correspond to a different cell type. This function takes a cell_data_set as input, clusters the cells using Louvain/Leiden community detection, and returns a cell_data_set with internally stored cluster assignments. In addition to clusters this function calculates partitions, which represent superclusters of the Louvain/Leiden communities that are found using a kNN pruning method.*
+
+From [**Monocle3 documentation**](https://cole-trapnell-lab.github.io/monocle3/docs/trajectories/)
+
+> *Although cells may continuously transition from one state to the next with no discrete boundary between them, Monocle does not assume that all cells in the dataset descend from a common transcriptional "ancestor". In many experiments, there might in fact be multiple distinct trajectories. For example, in a tissue responding to an infection, tissue resident immune cells and stromal cells will have very different initial transcriptomes, and will respond to infection quite differently, so they should be a part of the same trajectory.*
+>
+> *Monocle is able to learn when cells should be placed in the same trajectory as opposed to separate trajectories through its clustering procedure. Recall that we run cluster_cells(), each cell is assigned not only to a cluster but also to a partition. When you are learning trajectories, each partition will eventually become a separate trajectory. *
+
+We can now cluster the cells. Monocle3 does not require a user-defined clustering resolution, as it can detect an optimum resolution automatically. Additionally, it groups the data into both high-resolution clusters and low-resolution superclusters (a.k.a. partitions) simultaneously.
+
+```{r cluster_cells}
+lvls <- c("cluster", "partition")
+cds <- xfun::cache_rds({
+  cds <- monocle3::cluster_cells(cds)
+  # add it to the colData
+  SummarizedExperiment::colData(cds)$cluster <- monocle3::clusters(cds)
+  SummarizedExperiment::colData(cds)$partition <- monocle3::partitions(cds)
+  cds
+}, file = "cds_clustered.rds", rerun = rerun) 
 ```
 
-### Find clusters at different clustering resolutions
-
-Then, groups of nuclei are iteratively grouped together. Clusters are identified by a SNN modularity optimisation-based clustering algorithm. This procedure is repeated for all clustering resolutions to be tested (set by the `clustering_resolutions` argument). 
-
-The clustering resolutions to be tested are **`r paste(clustering_resolutions, sep = ", ")`**.
-
-```{r find_clusters}
-seu <- Seurat::FindClusters(seu, resolution = clustering_resolutions, verbose = F)
-```
-
-### Evaluate all clustering resolutions
-
-#### Visual inspection
-
-A final clustering resolution can be decided by looking for sensible groupings of nuclei projected onto the dimensionality reduction plots. 
-
-```{r resolutions_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, length(clustering_resolutions) * 3.75), fig.cap = "Plot of all reductions, coloured by clusters"}
-# plot all clustering resolutions vs all reductions
-resolutions_vs_reductions <- list()
-purrr::walk(clustering_resolutions, function(res) {
-  purrr::walk(Seurat::Reductions(seu), function(redu) {
-      title <- paste0(redu, "_by_cluster_res_", res)
-      resolutions_vs_reductions [[title]] <<-
-        dittoSeq::dittoDimPlot(
-          seu,
-          paste0(Seurat::DefaultAssay(seu), "_snn_res.", res),
-          reduction.use = redu,
-          size = 0.5,
-          raster = F,
-          legend.show = F,
-          show.axes.numbers = F,
-          show.grid.lines = F,
-          main = gsub("_", " ", title)
-        )
-    })
-})
-# create grob layout
-p <-
-  gridExtra::marrangeGrob(
-    grobs = resolutions_vs_reductions ,
-    nrow = length(clustering_resolutions),
-    ncol = length(Seurat::Reductions(seu)),
-    layout_matrix = matrix(1:length(resolutions_vs_reductions ),
-                           length(clustering_resolutions),
-                           length(Seurat::Reductions(seu)),
-                           TRUE),
-    top = NULL
-  )
-p
-```
-
-#### Clustering tree
-
-Alternatively, the `clustree` package provides a more intuitive way to visualise clustering behaviour at different resolutions and to devide on a final clustering resolution. It constructs clustering trees that show how samples move and split up as the number of clusters increases. A 'solid' clustering resolution is taken as one in a part of the tree where clusters remain relatively stable and constant for a few resolution. This indicates that the groups are robust and strongly supported by the data, rather than volatile and noisy. 
-
-```{r clustering_tree, class.source = 'fold-hide', fig.cap = "Plot of clustering tree"}
-snn_res_prefixes <- paste0(Seurat::DefaultAssay(seu), "_snn_res.")
-p <- 
-  clustree::clustree(seu@meta.data[, grep(snn_res_prefixes, colnames(seu@meta.data))],
-                       prefix = snn_res_prefixes)
-p
-```
-
-### Final clustering resolution
-
-`r if (is.null(final_clustering_resolution)) { "A final clustering resolution has not been given. Please run the package again and pass a resolution to the final_clustering_resolution argument to proceed with downstream analysis." }`
-
-```{r exit_if_no_res, include = is.null(final_clustering_resolution), eval = is.null(final_clustering_resolution)}
-# truncate document if no final clustering resolution has been provided
-knitr::knit_exit()
-```
-
-The final clustering resolution has been set to **`r final_clustering_resolution`**. Factor levels must be corrected to numeric ordering. 
-
-```{r set_res}
-seu <- xfun::cache_rds({
-  seu$cluster <- seu@meta.data[, paste0(snn_res_prefixes, final_clustering_resolution)]
-  seu$cluster <- factor(seu$cluster, levels = paste(sort(as.integer(levels(seu$cluster)))))
-  seu
-}, file = "seu_clustered.rds", rerun = rerun)
-```
-
-```{r final_clusters, class.source = 'fold-hide', fig.dim = c(5, 5), fig.cap = "Plot of final clusters"}
-seu_final_clusters_umap <-
-  dittoSeq::dittoDimPlot(seu, "cluster", size = 0.5, xlab = NULL, ylab = NULL) +
+```{r clusters_and_partitions, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by partition"}
+final_umap <- 
+  lvls %>%
+  purrr::map(function(lvl) {
+    dittoSeq::dittoDimPlot(cds, lvl, size = 0.5, xlab = NULL, ylab = NULL) +
     ggplot2::geom_label(
-      data = seu@meta.data %>%
-        dplyr::right_join(get_centroids(seu, "umap", cluster), by = "cluster") %>%
-        dplyr::distinct(cluster, x, y),
-      ggplot2::aes(x, y, label = cluster),
-      size = 3, fill = 'white', alpha = 0.7, label.size = NA) +
-  umap_void_theme
-seu_final_clusters_umap
+      data = SummarizedExperiment::colData(cds) %>%
+        dplyr::as_tibble() %>%
+        dplyr::right_join(get_centroids(cds, "UMAP", lvl), by = lvl) %>% 
+        dplyr::distinct(get(lvl), x, y),
+      ggplot2::aes(x, y, label = `get(lvl)`),
+      size = 3, fill = "white", alpha = 0.7, label.size = NA) +
+    umap_void_theme
+  }) %>%
+  setNames(lvls)
+p <- final_umap[["cluster"]] + final_umap[["partition"]]
+p
 ```
 
-```{r clusters_per_sample, class.source = 'fold-hide', fig.cap = "Plots of clusters per sample and samples per cluster"}
-p <-
-  dittoSeq::dittoBarPlot(seu,
-                         var = "cluster",
-                         scale = "count",
-                         group.by = "sample",
-                         main = "",
-                         legend.title = "cluster") +
-  ggplot2::theme(legend.position = "bottom",
-                 legend.title = ggplot2::element_blank(),
-                 axis.text.x = ggplot2::element_text(angle = 90, size = 5),
-                 legend.text = ggplot2::element_text(size = 5)) +
-  ggplot2::guides(color = guide_legend(override.aes = list(size = 0.5))) +
-  dittoSeq::dittoBarPlot(seu,
-                         var = "sample",
-                         scale = "count",
-                         group.by = "cluster",
-                         main = "",
-                         legend.title = "sample") +
-  ggplot2::theme(legend.position = "bottom",
-                 legend.title = ggplot2::element_blank(),
-                 axis.text.x = ggplot2::element_text(angle = 90, size = 5),
-                 legend.text = ggplot2::element_text(size = 5)) +
-  ggplot2::guides(color = guide_legend(override.aes = list(size = 0.5))) +
-  patchwork::plot_layout(
-    ncol = 2,
-    widths = c(
-      seu$sample %>% unique() %>% length(),
-      seu$cluster %>% unique() %>% length()
-    )
-  )
+## Differential expression analysis
+
+Once cells have been clustered, we can isolate genes that are highly differentially expressed between the clusters. These cluster marker genes can 
+
+First, we identify the top genes that are most specifically expressed in each cluster and each partition. 
+
+```{r cluster_markers, eval = T, results = F, warning = F, message = F}
+# monocle3::top_markers has a bug, so this function doesn't work:
+# marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", reference_cells = 1000)
+
+# using a debugged version of the function ()
+cds_markers <- xfun::cache_rds({
+  cds_markers <- 
+    lvls %>%
+    purrr::map(function(lvl) {
+      top_markers_develop(cds, group_cells_by = lvl)
+    }) %>%
+    setNames(lvls)
+  cds_markers
+}, file = "cds_markers.rds", rerun = rerun)
+
+# get top 3 markers per cluster/partition
+top_cds_markers <- 
+  cds_markers %>%
+  purrr::map(function(lvl) {
+    lvl %>%
+      dplyr::as_tibble() %>%
+      dplyr::filter(fraction_expressing >= 0.10) %>%
+      dplyr::group_by(cell_group) %>%
+      dplyr::arrange(desc(as.numeric(cell_group))) %>%
+      dplyr::top_n(3, pseudo_R2)
+  })
+```
+
+```{r top_markers, eval = T, class.source = 'fold-hide', fig.dim = c(10, dplyr::n_distinct(monocle3::clusters(cds))), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
+# monocle3::plot_genes_by_group has a bug, so this function doesn't work:
+# p <-
+#   monocle3::plot_genes_by_group(
+#     cds,
+#     markers = top_specific_marker_ids,
+#     ordering_type = "maximal_on_diag",
+#     max.size=3) +
+#     ggplot2::theme(text = ggplot2::element_text(size = 8))
+
+# using dittoSeq::dittoDotPlot instead
+p <- 
+  lvls %>%
+  purrr::map(function(lvl) {
+    dittoSeq::dittoDotPlot(
+      cds, 
+      vars = top_cds_markers[[lvl]] %>% dplyr::pull(gene_id) %>% unique(),
+      group.by = lvl,
+      x.labels.rotate = F) +
+    ggplot2::coord_flip() +
+    ggplot2::theme(text = ggplot2::element_text(size = 8))
+  }) %>%
+  gridExtra::marrangeGrob(nrow = 1, ncol = 2, top = NULL)
 p
 ```
 
 ## Celltype annotation
 
 The conventional approach to celltype annotation for sc/snRNAseq datasets is to inspect known marker genes from each of the celltypes that are expected and likely to be found at the sample site. Known relationships between marker genes and celltypes of interest can be obtained from databases or manually curated from literature. Then, the expression profiles of all markers from all celltypes across all clusters is programmatically or visually inspected and clusters are labelled according to their marker profile. 
+
+### Manual celltype annotation using curated literature markers
+
+```{r cds_avail_markers, echo = F}
+avail_markers <- get_available_markers(cds, markers)
+```
+
+Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
+
+```{r all_modules_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
+df <- 
+  avail_markers %>%
+  purrr::map(purrr::map, purrr::map, dplyr::as_tibble) %>% 
+  purrr::map(purrr::map, dplyr::bind_rows, .id = "module") %>%
+  purrr::map(dplyr::bind_rows, .id = "source") %>%
+  dplyr::bind_rows(.id = "study") %>%
+  dplyr::distinct() %>%
+  dplyr::mutate(unique_module = paste(study, substr(source, 1, 3), module) %>% janitor::make_clean_names(allow_dupes = T)) %>%
+  dplyr::group_by(unique_module) %>%
+  dplyr::mutate(module_size = dplyr::n_distinct(value),
+                module = paste0("(", module_size, ") ", module)) %>%
+  dplyr::ungroup()
+gene_group_df <- 
+  df %>% 
+  dplyr::select(value, unique_module) 
+annotations <-
+  df %>% 
+  dplyr::select(-value) %>%
+  dplyr::distinct() %>%
+  tibble::column_to_rownames("unique_module")
+n_sources <- dplyr::n_distinct(annotations$source)
+n_studies <- dplyr::n_distinct(annotations$study)
+colours <- dittoSeq::dittoColors()[1:(n_sources + n_studies)]
+annotation_colours <- list(
+  source = head(colours, n_sources) %>% setNames(unique(annotations$source)),
+  study = tail(colours, n_studies) %>% setNames(unique(annotations$study)))
+cell_group_df <- 
+  tibble::tibble(
+    cell = row.names(SummarizedExperiment::colData(cds)), 
+    cluster = monocle3::clusters(cds),
+    partition = monocle3::partitions(cds))
+```
+
+```{r modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
+agg_mat <- monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "cluster")])
+agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
+annotations <- annotations[rownames(agg_mat),]
+p <- 
+  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
+                     labels_row = annotations[, "module"],
+                     annotation_row = annotations[, c("source", "study")],
+                     annotation_colors = annotation_colours,
+                     fontsize = 8)
+p
+```
+
+```{r modules_vs_partitions_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
+# check if >1 partition
+if (dplyr::n_distinct(cell_group_df$partition) > 1) {
+  agg_mat <- monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "partition")])
+  agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
+  annotations <- annotations[rownames(agg_mat),]
+  p <- 
+  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
+                     labels_row = annotations[, "module"],
+                     annotation_row = annotations[, c("source", "study")],
+                     annotation_colors = annotation_colours,
+                     fontsize = 8)
+  p
+}
+```
+
+```{r knit_module_plots, echo = FALSE, warning = F, message = F, results = 'asis'}
+# get available markers
+avail_markers <- get_available_markers(cds, markers)
+
+to_knit <- c()
+agg_mat <- list()
+annotations <- list()
+cell_group_df <- list()
+annotation_colours <- list()
+longest_annot <- list()
+
+for(study in names(avail_markers)) {
+
+  to_knit <- c(to_knit, '\n', get_subheading(study))
+
+  for(source in names(avail_markers[[study]])) {
+
+    to_knit <- c(to_knit, get_subsubheading(study, source, avail_markers))
+    author <- get_author(study)
+    chunk_name <- paste(author, substr(source, 1, 3)) %>% janitor::make_clean_names()
+
+    for(lvl in lvls) {
+      
+      chunk_name_lvl <- paste(chunk_name, lvl) %>% janitor::make_clean_names()
+      
+      if (dplyr::n_distinct(SummarizedExperiment::colData(cds)[, lvl]) > 1) {
+        
+        annotations[[chunk_name_lvl]] <- avail_markers[[study]][[source]] %>% purrr::map(dplyr::as_tibble) %>% dplyr::bind_rows(.id = "annotation") %>% dplyr::group_by(value) %>% dplyr::summarise(annotation = paste(annotation, collapse = ", ") %>% substr(1, 100)) %>% dplyr::arrange(annotation) %>% tibble::column_to_rownames("value")
+        annotation_colours[[chunk_name_lvl]] <- list(annotation = c(dittoSeq::dittoColors()[1:dplyr::n_distinct(annotations[[chunk_name_lvl]]$annotation)]) %>% setNames(unique(annotations[[chunk_name_lvl]]$annotation)))
+        cell_group_df[[chunk_name_lvl]] <- tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)), cell_group = SummarizedExperiment::colData(cds)[, lvl])
+        agg_mat[[chunk_name_lvl]] <- monocle3::aggregate_gene_expression(cds[rownames(annotations[[chunk_name_lvl]])], cell_group_df = cell_group_df)
+        longest_annot[[chunk_name_lvl]] <- annotations[[chunk_name_lvl]]$annotation %>% nchar() %>% max()
+        
+        knit_lvl_module_heatmap <- c(
+          '',
+          paste0('```{r ', chunk_name_lvl, '_module_heatmap, class.source = "fold-hide",  warning = F, message = F, fig.dim = c(10, length(unlist(avail_markers[[study]][[source]])) / 6)}'),
+          paste0('p <- pheatmap::pheatmap(agg_mat[["', chunk_name_lvl, '"]], scale = "row", cluster_rows = F, clustering_method = "ward.D2", annotation_row = annotations[["', chunk_name_lvl, '"]], annotation_colors = annotation_colours[["', chunk_name_lvl, '"]], annotation_names_row = F, gaps_row = which(annotations[["', chunk_name_lvl, '"]]$annotation != dplyr::lag(annotations[["', chunk_name_lvl, '"]]$annotation)) - 1, fontsize = 6)'),
+          'p',
+          '```',
+          ''
+          )
+      } else { 
+        knit_lvl_module_heatmap <- paste0("Only one ", lvl, ", so cannot produce a heatmap!\n") 
+      }
+      
+      dev_off_if()
+      knitted_lvl_module_heatmap <- knitr::knit_child(text = knit_lvl_module_heatmap, envir = environment(), quiet = TRUE)
+      dev_off_if()
+      to_knit <- c(to_knit, knitted_lvl_module_heatmap)
+      
+    }
+  
+    for(ct in names(avail_markers[[study]][[source]])) {
+
+      to_knit <- c(to_knit, paste0("\n##### Population: **", ct, "**\n"))
+      chunk_name_ct <- paste(chunk_name, ct) %>% janitor::make_clean_names()
+      ct_markers <- avail_markers[[study]][[source]][[ct]]
+      n_ct_markers <- length(ct_markers)
+
+      if(n_ct_markers < 50) {
+        knit_module_dimplots <- c(
+          '',
+          paste0('```{r ', chunk_name_ct, ', echo = F, warning = F, message = F, fig.dim = get_fig_dims((n_ct_markers + 2), n_cols = 4, height_to_width_ratio = 1.2)}'),
+          'p <- plot_markers_on_umap(cds, ml = ct_markers, final_umap)',
+          'p',
+          '```',
+          ''
+          )
+      } else {
+        knit_module_dimplots <- paste(n_ct_markers, "markers in this set - too many to print!\n")
+      }
+
+      dev_off_if()
+      knitted_module_dimplots <- knitr::knit_child(text = knit_module_dimplots, envir = environment(), quiet = TRUE)
+      dev_off_if()
+      to_knit <- c(to_knit, knitted_module_dimplots)
+
+    }
+  }
+}
+dev_off_if()
+cat(unlist(to_knit), sep = '\n')
+```
+
+## Final cluster annotations
+
+`r if (is.null(final_cluster_annotations)) { "Final celltype annotations of clusters have not been given. Please run the package again and pass celltype labels to the final_cluster_annotations argument to proceed with downstream analysis." }`
+
+```{r exit_if_no_cts, include = is.null(final_cluster_annotations), eval = is.null(final_cluster_annotations)}
+# truncate document if no final celltype annotations have been provided
+knitr::knit_exit()
+```
 
 ### Automated celltype annotation using database markers
 
@@ -927,258 +1071,15 @@ p <-
 p
 ```
 
-## Manual celltype annotation using curated literature markers
 
-Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
 
-```{r, echo = FALSE, warning = F, message = F, results = 'asis'} 
-plot_markers_on_object(object = seu, object_type = "Seurat")
-```
-
-# `Monocle3` processing
-
-The `Monocle3` package provides alternative processing approaches for single cell data.   
-
-First, we must convert the data to Monocle3's proprietary `cell_data_set` object and fill in gene names and cell cycle scores.
-
-```{r seu_to_cds, results = F, warning = F}
-cds <- xfun::cache_rds({
-  cds <- SeuratWrappers::as.cell_data_set(seu_filtered, assay = "RNA")
-  SummarizedExperiment::rowData(cds)$gene_short_name <- 
-    row.names(SummarizedExperiment::rowData(cds))
-  SummarizedExperiment::colData(cds)$Phase <- 
-    seu$Phase
-  cds
-}, file = "cds.rds", rerun = rerun)
-```
-
-## Preprocessing and linear dimensionality reduction
-
-First, we perform normalisation and principal component analysis. We use the previously decided dimensionality of the data (**`r final_n_dims`**) from the `Seurat` section.
-
-```{r mon_preprocessing}
-cds <- monocle3::preprocess_cds(cds, num_dim = final_n_dims)
-```
-
-## Non-linear dimensionality reduction 
-
-Next, we perform non-linear dimensionality reduction of the data (UMAP). 
-
-```{r mon_umap, results = F, warning = F, message = F}
-cds <- xfun::cache_rds({
-  monocle3::reduce_dimension(cds, preprocess_method = "PCA")
-}, file = "cds_nonlin_dim_red.rds", rerun = rerun)
-```
-
-Plotting all different groupings of the data onto the reductions can help reveal batch effects. If certain experimental variables seem to strongly influence the grouping of cells, these effects can be removed. If so, use the `align_cds` step from [this tutorial](https://cole-trapnell-lab.github.io/monocle3/docs/clustering/#reduce-dimension).
-
-```{r mon_avail_groupings, include = F}
-# amend groupings
-avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colData(cds))]
-```
-
-```{r mon_groupings_vs_reductions, class.source = 'fold-hide', fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
-# fig.dim = get_fig_dims(length(avail_groupings) * (length(cds@reduce_dim_aux) + 1), n_cols = length(cds@reduce_dim_aux) + 1), 
-# plot all groupings vs all reductions
-groupings_vs_reductions <- list()
-purrr::walk(avail_groupings, function(grouping) {
-  purrr::walk(names(cds@reduce_dim_aux), function(redu) {
-    title <- paste0(redu, "_vs_", grouping)
-    p <- 
-      monocle3::plot_cells(
-        cds, 
-        reduction_method = redu, 
-        color_cells_by = grouping,
-        show_trajectory_graph = F, 
-        label_cell_groups = F)
-    groupings_vs_reductions[[paste0(grouping, "_legend")]] <<-
-      lemon::g_legend(p)
-    groupings_vs_reductions[[title]] <<- 
-      p + ggplot2::theme(legend.position = "none")
-  })
-})
-# create grob layout
-p <-
-  gridExtra::marrangeGrob(
-    grobs = groupings_vs_reductions,
-    nrow = length(avail_groupings),
-    ncol = length(cds@reduce_dim_aux) + 1,
-    layout_matrix = matrix(
-      1:length(groupings_vs_reductions),
-      length(avail_groupings),
-      length(cds@reduce_dim_aux) + 1,
-      TRUE
-    ),
-    top = NULL
-  )
-p
-```
-
-## Clustering
-
-`Monocle3` offers an unsupervised clustering function. This function also separates cells into superclusters, called partitions. These represent higher order communities within the dataset, allowing the different resolutions to coexist for downstream analysis.
-
-From **`Monocle3::cluster_cells` vignette**
-
-> *Unsupervised clustering of cells is a common step in many single-cell expression workflows. In an experiment containing a mixture of cell types, each cluster might correspond to a different cell type. This function takes a cell_data_set as input, clusters the cells using Louvain/Leiden community detection, and returns a cell_data_set with internally stored cluster assignments. In addition to clusters this function calculates partitions, which represent superclusters of the Louvain/Leiden communities that are found using a kNN pruning method.* 
-
-From [**Monocle3 documentation**](https://cole-trapnell-lab.github.io/monocle3/docs/trajectories/)
-
-> *Although cells may continuously transition from one state to the next with no discrete boundary between them, Monocle does not assume that all cells in the dataset descend from a common transcriptional "ancestor". In many experiments, there might in fact be multiple distinct trajectories. For example, in a tissue responding to an infection, tissue resident immune cells and stromal cells will have very different initial transcriptomes, and will respond to infection quite differently, so they should be a part of the same trajectory.*
->
-> *Monocle is able to learn when cells should be placed in the same trajectory as opposed to separate trajectories through its clustering procedure. Recall that we run cluster_cells(), each cell is assigned not only to a cluster but also to a partition. When you are learning trajectories, each partition will eventually become a separate trajectory. *
-
-We can now cluster the cells. Monocle3 does not require a user-defined clustering resolution, as it can detect an optimum resolution automatically. Additionally, it groups the data into both high-resolution clusters and low-resolution superclusters (a.k.a. partitions) simultaneously.
-
-```{r mon_cluster_cells}
-cds <- xfun::cache_rds({
-  cds <- monocle3::cluster_cells(cds)
-  # add it to the colData
-  SummarizedExperiment::colData(cds)$cluster <- monocle3::clusters(cds)
-  SummarizedExperiment::colData(cds)$partition <- monocle3::partitions(cds)
-  cds
-}, file = "cds_clustered.rds", rerun = rerun) 
-```
-
-```{r mon_clusters_and_partitions, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by partition"}
-p <-
-  monocle3::plot_cells(cds, label_cell_groups = F, show_trajectory_graph = F) +
-  monocle3::plot_cells(cds, color_cells_by = "partition", group_cells_by = "partition", label_cell_groups = F, show_trajectory_graph = F)
-p
-```
-
-## Differential expression analysis
-
-Once cells have been clustered, we can isolate genes that are highly differentially expressed between the clusters. These cluster marker genes can 
-
-First, we identify the top genes that are most specifically expressed in each cluster and each partition. 
-
-```{r mon_cluster_markers, eval = T, results = F, warning = F, message = F}
-# monocle3::top_markers has a bug, so this function doesn't work:
-# marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", reference_cells = 1000)
-
-# using a debugged version of the function ()
-cds_markers <- xfun::cache_rds({
-  lvls <- c("cluster", "partition")
-  cds_markers <- 
-    lvls %>%
-    purrr::map(function(lvl) {
-      top_markers_develop(cds, group_cells_by = lvl)
-    }) %>%
-    setNames(lvls)
-  cds_markers
-}, file = "cds_markers.rds", rerun = rerun)
-
-# get top 3 markers per cluster/partition
-top_cds_markers <- 
-  cds_markers %>%
-  purrr::map(function(lvl) {
-    lvl %>%
-      dplyr::as_tibble() %>%
-      dplyr::filter(fraction_expressing >= 0.10) %>%
-      dplyr::group_by(cell_group) %>%
-      dplyr::arrange(desc(as.numeric(cell_group))) %>%
-      dplyr::top_n(3, pseudo_R2)
-  })
-```
-
-```{r mon_top_cluster_markers, eval = T, class.source = 'fold-hide', fig.dim = c(10, dplyr::n_distinct(monocle3::clusters(cds))), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
-# monocle3::plot_genes_by_group has a bug, so this function doesn't work:
-# p <-
-#   monocle3::plot_genes_by_group(
-#     cds,
-#     markers = top_specific_marker_ids,
-#     ordering_type = "maximal_on_diag",
-#     max.size=3) +
-#     ggplot2::theme(text = ggplot2::element_text(size = 8))
-
-# using dittoSeq::dittoDotPlot instead
-p <- 
-  lvls %>%
-  purrr::map(function(lvl) {
-    dittoSeq::dittoDotPlot(
-      cds, 
-      vars = top_cds_markers[[lvl]] %>% dplyr::pull(gene_id) %>% unique(),
-      group.by = lvl,
-      x.labels.rotate = F) +
-    ggplot2::coord_flip() +
-    ggplot2::theme(text = ggplot2::element_text(size = 8))
-  }) %>%
-  gridExtra::marrangeGrob(nrow = 1, ncol = 2, top = NULL)
-p
-```
-
-## Manual celltype annotation using curated literature markers
-
-```{r cds_avail_markers, echo = F}
-avail_markers <- get_available_markers(cds, markers)
-```
-
-Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
-
-```{r all_modules_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
-df <- 
-  avail_markers %>%
-  purrr::map(purrr::map, purrr::map, dplyr::as_tibble) %>% 
-  purrr::map(purrr::map, dplyr::bind_rows, .id = "module") %>%
-  purrr::map(dplyr::bind_rows, .id = "source") %>%
-  dplyr::bind_rows(.id = "study") %>%
-  dplyr::distinct() %>%
-  dplyr::mutate(unique_module = paste(study, source, module) %>% janitor::make_clean_names(allow_dupes = T)) %>%
-  dplyr::group_by(unique_module) %>%
-  dplyr::mutate(module_size = dplyr::n_distinct(value),
-                module = paste0("(", module_size, ") ", module)) %>%
-  dplyr::ungroup()
-gene_group_df <- 
-  df %>% 
-  dplyr::select(value, unique_module) 
-annotations <-
-  df %>% 
-  dplyr::select(-value) %>%
-  dplyr::distinct() %>%
-  tibble::column_to_rownames("unique_module")
-n_sources <- dplyr::n_distinct(annotations$source)
-n_studies <- dplyr::n_distinct(annotations$study)
-colours <- dittoSeq::dittoColors()[1:(n_sources + n_studies)]
-annotation_cols <- list(
-  source = head(colours, n_sources) %>% setNames(unique(annotations$source)),
-  study = tail(colours, n_studies) %>% setNames(unique(annotations$study)))
-cell_group_df <- 
-  tibble::tibble(
-    cell = row.names(SummarizedExperiment::colData(cds)), 
-    cell_group = cds@clusters$UMAP$clusters)
-agg_mat <- 
-  monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df)
-agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
-annotations <- annotations[rownames(agg_mat),]
-p <- 
-  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method="ward.D2",
-                     labels_row = annotations[, "module"],
-                     annotation_row = annotations[, c("source", "study")],
-                     annotation_colors = annotation_cols)
-p
-```
-
-```{r, echo = FALSE, warning = F, message = F, results = 'asis'} 
-plot_markers_on_object(object = cds, object_type = "Monocle3")
-```
-
-## Final celltype annotations
-
-`r if (is.null(final_celltype_annotations)) { "Final celltype annotations have not been given. Please run the package again and pass a resolution to the final_celltype_annotations argument to proceed with downstream analysis." }`
-
-```{r exit_if_no_cts, include = is.null(final_celltype_annotations), eval = is.null(final_celltype_annotations)}
-# truncate document if no final celltype annotations have been provided
-knitr::knit_exit()
-```
-
-## inferCNV
-
-We annotate endothelial cells as matched normal and use this to infer copy number variants in the tumour population. 
-
-# Single cell trajectory analysis
+## Single cell trajectory analysis
 
 # Copy number analysis
+
+## Run inferCNV
+
+We annotate endothelial cells as matched normal and use this to infer copy number variants in the tumour population. 
 
 ## Run SCEVAN
 

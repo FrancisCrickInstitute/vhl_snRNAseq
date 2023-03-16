@@ -38,15 +38,26 @@ get_base_dir <- function() {
   }
 }
 
-# Get cluster centroids from a Seurat object
-get_centroids <- function(seu, reduction, ...) {
+# Get cluster centroids from a Seurat or cell_data_set object
+get_centroids <- function(object, reduction, lvl) {
+
+  if (class(object)[1] == "Seurat") {
+    embeddings <- seu@reductions[[reduction]]@cell.embeddings
+    metadata <- object@meta.data
+  } else if (class(object)[1] == "cell_data_set") {
+    embeddings <- SingleCellExperiment::reducedDims(cds)[[reduction]]
+    metadata <- SummarizedExperiment::colData(cds) %>% dplyr::as_tibble()
+  }
+
   dplyr::tibble(
-    x = seu@reductions[[reduction]]@cell.embeddings[,1],
-    y = seu@reductions[[reduction]]@cell.embeddings[,2],
-    seu@meta.data
+    x = embeddings[,1],
+    y = embeddings[,2],
+    metadata
   ) %>%
-    dplyr::group_by(...) %>%
-    dplyr::summarise(x = median(x), y = median(y))
+    dplyr::group_by(get(lvl)) %>%
+    dplyr::summarise(x = median(x), y = median(y)) %>%
+    dplyr::rename(!!lvl := `get(lvl)`)
+
 }
 
 # Get filters (anything below the median plus 5 x the median absolute deviation)
@@ -232,22 +243,34 @@ get_available_markers <- function(object, markers) {
 }
 
 # Plot all markers in the marker list (marker_list is a named list of marker modules)
-plot_markers_on_umap <- function(seu, ml, seu_final_clusters_umap, umap_void_theme) {
-  # list of plots
-  p <- list()
-  p[["clusters"]] <- seu_final_clusters_umap
+plot_markers_on_umap <- function(object, ml, final_umap) {
+
+  p <- final_umap
+
   purrr::walk(ml, function(g) {
+
+    # get ranges for colour gradient
+    if (class(object)[1] == "Seurat") {
+      dat <- object@assays$RNA@counts[g, object@assays$RNA@counts[g,] > 0]
+    } else if (class(object)[1] == "cell_data_set") {
+      dat <- object@assays@data$counts[g, object@assays@data$counts[g,] > 0]
+    }
+    minmax <- range(dat, na.rm = T)
+
+    # plot
     p[[g]] <<-
-      dittoSeq::dittoDimPlot(seu, g,
-                             size = 0.3, xlab = NULL, ylab = NULL) +
-      ggplot2::scale_colour_gradientn(colours = c("lightgrey", "#ECE147", "#2374B0"),
-                                      values = scales::rescale(
-                                        c(0,
-                                          min(seu@assays$RNA@counts[g,seu@assays$RNA@counts[g,] > 0],
-                                              na.rm = T),
-                                          max(seu@assays$RNA@counts[g,], na.rm = T)))) +
+      dittoSeq::dittoDimPlot(object, g, size = 0.3, xlab = NULL, ylab = NULL) +
+      ggplot2::geom_point(data =  dplyr::tibble(x = SingleCellExperiment::reducedDims(cds)$UMAP[names(dat), 1],
+                                                y = SingleCellExperiment::reducedDims(cds)$UMAP[names(dat), 2]) %>%
+                            dplyr::mutate(count = dat) %>%
+                            dplyr::as_tibble(),
+                          ggplot2::aes(x, y, colour = count), size = 0.4) +
+      ggplot2::scale_colour_gradientn(colours = c("grey", "#ECE147", "#2374B0"),
+                                      values = scales::rescale(c(0, minmax[1], minmax[2]))) +
       umap_void_theme
+
     })
+
   # create grob layout
   p <-
     gridExtra::marrangeGrob(grobs = p,
