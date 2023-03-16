@@ -42,11 +42,11 @@ get_base_dir <- function() {
 get_centroids <- function(object, reduction, lvl) {
 
   if (class(object)[1] == "Seurat") {
-    embeddings <- seu@reductions[[reduction]]@cell.embeddings
+    embeddings <- object@reductions[[reduction]]@cell.embeddings
     metadata <- object@meta.data
   } else if (class(object)[1] == "cell_data_set") {
-    embeddings <- SingleCellExperiment::reducedDims(cds)[[reduction]]
-    metadata <- SummarizedExperiment::colData(cds) %>% dplyr::as_tibble()
+    embeddings <- SingleCellExperiment::reducedDims(object)[[reduction]]
+    metadata <- SummarizedExperiment::colData(object) %>% dplyr::as_tibble()
   }
 
   dplyr::tibble(

@@ -40,7 +40,7 @@ setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 library(devtools) ; load_all() ;
 
 testing = F
-do_timestamp = T
+do_timestamp = F
 rerun = T
 
 # run qc report
