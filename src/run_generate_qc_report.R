@@ -41,7 +41,7 @@ library(devtools) ; load_all() ;
 
 testing = F
 do_timestamp = F
-rerun = T
+rerun = F
 
 # run qc report
 generate_qc_report(

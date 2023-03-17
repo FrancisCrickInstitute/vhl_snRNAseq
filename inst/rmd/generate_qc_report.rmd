@@ -857,7 +857,7 @@ p <-
     size = 2, fill = 'white', alpha = 0.8, seed = 1234, label.size = NA
   ) +
   umap_void_theme +
-  dittoSeq::dittoDimPlot(seu, "lesion_type", size = 0.7) +
+  dittoSeq::dittoDimPlot(cds, "lesion_type", size = 0.7) +
   umap_void_theme + 
   ggplot2::theme(legend.position = "bottom")
 p
@@ -950,54 +950,74 @@ df <-
   dplyr::mutate(module_size = dplyr::n_distinct(value),
                 module = paste0("(", module_size, ") ", module)) %>%
   dplyr::ungroup()
+
+# genes, grouped into modules
 gene_group_df <- 
   df %>% 
   dplyr::select(value, unique_module) 
-annotations <-
-  df %>% 
-  dplyr::select(-value) %>%
-  dplyr::distinct() %>%
-  tibble::column_to_rownames("unique_module")
-n_sources <- dplyr::n_distinct(annotations$source)
-n_studies <- dplyr::n_distinct(annotations$study)
-colours <- dittoSeq::dittoColors()[1:(n_sources + n_studies)]
-annotation_colours <- list(
-  source = head(colours, n_sources) %>% setNames(unique(annotations$source)),
-  study = tail(colours, n_studies) %>% setNames(unique(annotations$study)))
+
+# cells, grouped into clusters and partitions
 cell_group_df <- 
   tibble::tibble(
     cell = row.names(SummarizedExperiment::colData(cds)), 
     cluster = monocle3::clusters(cds),
     partition = monocle3::partitions(cds))
+
+# row annotations (study, source)
+row_annotations <-
+  df %>% 
+  dplyr::select(-value) %>%
+  dplyr::distinct() %>%
+  tibble::column_to_rownames("unique_module")
+
+# col annotations (cluster, partition)
+col_annotations <-
+  cell_group_df %>%
+  dplyr::distinct(cluster, partition) %>%
+  tibble::column_to_rownames("cluster")
+
+# get row and col annotation colours
+colours <- 
+  list(source = row_annotations$source,
+       study = row_annotations$study,
+       partition = col_annotations$partition) %>%
+  purrr::map(function(i) {
+    dittoSeq::dittoColors()[1:length(unique(i))] %>%
+      setNames(unique(i))
+    }
+  )
+
+# check if >1 partition
+multiple_partitions <- dplyr::n_distinct(cell_group_df$partition) > 1
 ```
 
 ```{r modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
-agg_mat <- monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "cluster")])
+agg_mat <- 
+  monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "cluster")])
 agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
-annotations <- annotations[rownames(agg_mat), ]
+row_annotations_clust <- row_annotations[rownames(agg_mat), ]
 p <- 
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = annotations[, "module"],
-                     annotation_row = annotations[, c("source", "study")],
-                     annotation_colors = annotation_colours,
+                     labels_row = row_annotations$module,
+                     annotation_row = row_annotations_clust[, c("source", "study")],
+                     annotation_col = col_annotations,
+                     annotation_colors = colours,
                      fontsize = 8)
 p
 ```
 
-```{r modules_vs_partitions_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
-# check if >1 partition
-if (dplyr::n_distinct(cell_group_df$partition) > 1) {
-  agg_mat <- monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "partition")])
-  agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
-  annotations <- annotations[rownames(agg_mat),]
-  p <- 
+```{r modules_vs_partitions_heatmap, eval = multiple_partitions == T, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
+agg_mat <- 
+  monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "partition")])
+agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
+row_annotations_part <- row_annotations[rownames(agg_mat), ]
+p <- 
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = annotations[, "module"],
-                     annotation_row = annotations[, c("source", "study")],
-                     annotation_colors = annotation_colours,
+                     labels_row = row_annotations$module,
+                     annotation_row = row_annotations_part[, c("source", "study")],
+                     annotation_colors = colours,
                      fontsize = 8)
-  p
-}
+p
 ```
 
 ```{r knit_module_plots, echo = FALSE, warning = F, message = F, results = 'asis'}
@@ -1094,6 +1114,8 @@ knitr::knit_exit()
 ```
 
 ## Single cell trajectory analysis
+
+
 
 # Copy number analysis
 

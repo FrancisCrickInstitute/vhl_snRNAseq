@@ -260,8 +260,8 @@ plot_markers_on_umap <- function(object, ml, final_umap) {
     # plot
     p[[g]] <<-
       dittoSeq::dittoDimPlot(object, g, size = 0.3, xlab = NULL, ylab = NULL) +
-      ggplot2::geom_point(data =  dplyr::tibble(x = SingleCellExperiment::reducedDims(cds)$UMAP[names(dat), 1],
-                                                y = SingleCellExperiment::reducedDims(cds)$UMAP[names(dat), 2]) %>%
+      ggplot2::geom_point(data =  dplyr::tibble(x = SingleCellExperiment::reducedDims(object)$UMAP[names(dat), 1],
+                                                y = SingleCellExperiment::reducedDims(object)$UMAP[names(dat), 2]) %>%
                             dplyr::mutate(count = dat) %>%
                             dplyr::as_tibble(),
                           ggplot2::aes(x, y, colour = count), size = 0.4) +
