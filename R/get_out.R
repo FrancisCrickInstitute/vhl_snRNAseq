@@ -22,7 +22,9 @@ get_out <- function(out_dir,
   } %>% {
     # pre-set file names (TODO: define these once all outputs are finalised)
     purrr::map(list(base = "",
-                    cache = "/cache/"),
+                    cache = "/cache/",
+                    infercnv = "/infercnv/",
+                    scevan = "/scevan/"),
                function(x)
       paste0(., x, "/")  %>% clean_path())
   }

@@ -1113,15 +1113,85 @@ cat(unlist(to_knit), sep = '\n')
 knitr::knit_exit()
 ```
 
+```{r final_cluster_annotations, echo = F}
+# get final cluster annotations
+final_cluster_annotations_df <-
+  dplyr::left_join(
+    tibble::as_tibble(SummarizedExperiment::colData(cds)),
+    tibble::enframe(final_cluster_annotations,
+                    name = "cluster",
+                    value = "final_cluster_annotation"),
+    by = "cluster"
+  )
+# encode in the colData
+SummarizedExperiment::colData(cds)$final_cluster_annotation <-
+  final_cluster_annotations_df$final_cluster_annotation
+```
+
+```{r fca_kable, echo = F}
+final_cluster_annotations_df %>%
+  dplyr::group_by(cluster, final_cluster_annotation) %>%
+  dplyr::count() %>%
+  knitr::kable()
+```
+
+```{r final_cluster_annotations_dimplot, class.source = 'fold-hide', fig.dim = c(10, 4.5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by final cluster annotation"}
+p <- 
+  final_umap[["cluster"]] + 
+  dittoSeq::dittoDimPlot(cds, "final_cluster_annotation")
+p
+```
+
 ## Single cell trajectory analysis
-
-
 
 # Copy number analysis
 
 ## Run inferCNV
 
+From [**github.com/broadinstitute/inferCNV/wiki**](https://github.com/broadinstitute/inferCNV/wiki)
+
+>  ***InferCNV: Inferring copy number alterations from tumor single cell RNA-Seq data***
+>
+> *InferCNV is used to explore tumor single cell RNA-Seq data to identify evidence for somatic large-scale chromosomal copy number alterations, such as gains or deletions of entire chromosomes or large segments of chromosomes. This is done by exploring expression intensity of genes across positions of tumor genome in comparison to a set of reference 'normal' cells. A heatmap is generated illustrating the relative expression intensities across each chromosome, and it often becomes readily apparent as to which regions of the tumor genome are over-abundant or less-abundant as compared to that of normal cells.*
+
+`r if ("endothelial" %ni% SummarizedExperiment::colData(cds)$final_cluster_annotation) { "inferCNV requires an endothelial cluster as a baseline for CNV analysis, but the final celltype annotations of clusters (final_celltype_annotations argument) do not include an 'endothelial' cluster. Please run the package again with an 'endothelial' cluster specified in order to run inferCNV." }`
+
+```{r exit_if_no_endothelial, include = "endothelial" %ni% SummarizedExperiment::colData(cds)$final_cluster_annotation, eval = "endothelial" %ni% SummarizedExperiment::colData(cds)$final_cluster_annotation}
+# truncate document if no endothelial celltype annotations have been provided
+knitr::knit_exit()
+```
+
 We annotate endothelial cells as matched normal and use this to infer copy number variants in the tumour population. 
+
+```{r run_infercnv}
+# create infercnv output directory
+dir.create(out$infercnv, showWarnings = F)
+
+# write annotations_file for infercnv
+infercnv_annotations_file <- paste0(out$infercnv, "infercnv_annotations.tsv")
+SummarizedExperiment::colData(cds)[, "final_cluster_annotation", drop = F] %>%
+  write.table(infercnv_annotations_file, col.names = F, quote = F, sep = "\t")
+
+# create infercnv object
+infercnv_obj <- 
+  infercnv::CreateInfercnvObject(
+    raw_counts_matrix = cds@assays@data$counts,
+    annotations_file = infercnv_annotations_file,
+    gene_order_file = "data/gencode/gencode.v43.basic.annotation_clean.bed",
+    ref_group_names = c("endothelial")
+  )
+
+# perform infercnv operations to reveal cnv signal
+infercnv_obj <-
+  infercnv::run(
+    infercnv_obj,
+    cutoff = 1,
+    out_dir = out$infercnv,
+    cluster_by_groups = T,
+    denoise = T,
+    HMM = T
+  )
+```
 
 ## Run SCEVAN
 
@@ -1132,8 +1202,7 @@ From [**github.com/AntonioDeFalco/SCEVAN**](https://github.com/AntonioDeFalco/SC
 >  *SCEVAN is an R package that starting from the raw count matrix of scRNA data automatically classifies the cells present in the biopsy by segregating non-malignant cells of tumor microenviroment from the malignant cells and also characterizes the clonal structure of these malignant cells. It identfies cell subpopulations with different copy number architecture and reports the specific and shared alterations of each subpopulation. The aim of the tool is to automate the entire analysis by allowing it to be performed in a very simple and completely unsupervised way.*
 
 ```{r scevan_dir, eval = F, include = F}
-scevan_dir <- paste0(out$base, "/SCEVAN/") 
-dir.create(scevan_dir, showWarnings = F)
+dir.create(out$scevan, showWarnings = F)
 ```
 
 `SCEVAN` output will be saved to `r scevan_dir`.
@@ -1147,9 +1216,6 @@ seu_counts_by_sample <- Seurat::SplitObject(seu, split.by = integration_col) %>%
 results <- SCEVAN::multiSampleComparisonClonalCN(seu_counts_by_sample)
 
 # move output to SCEVAN dir
-system(paste("mv output/*", scevan_dir, "; rm -Rf output"))
-
-# save results
-saveRDS(results, paste0(scevan_dir, "/results.rds"))
+system(paste("mv output/*", out$scevan, "; rm -Rf output"))
 ```
 
