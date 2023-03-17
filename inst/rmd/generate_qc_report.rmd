@@ -809,7 +809,7 @@ p <-
 p
 ```
 
-```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 4, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
+```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 5, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
 get_singler_annot_label <- function(cds, lvl) {
   level = lvl
   dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
