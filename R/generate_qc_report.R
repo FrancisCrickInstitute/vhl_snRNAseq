@@ -22,6 +22,8 @@
 #' @param do_timestamp If `TRUE`, will save the output to a time-stamped subdirectory (e.g. `20230217_105554/`).
 #' @param do_integration If `TRUE`, will integrate the dataset and save the output to `integrated/` subdirectory. If `FALSE` (default), output will save to `unintegrated/` subdirectory.
 #' @param integration_col If `do_integration` is `TRUE`, Seurat metadata column upon which to integrate the dataset.
+#' @param final_annotations Named vector of celltype annotations for the clusters/partitions in the dataset.
+#' @param final_annotations_lvl The level of grouping (cluster or partition) at which the `final_annotations` should be applied. Default is "partition".
 #' @param testing If `testing` is `TRUE`, a test run of the function is performed using a subset of a small dataset. The output is saved to `out/test/`.
 #' @param rerun If `rerun` is `TRUE`, caches will be invalidated and all analyses will be run from scratch. If `FALSE` (default) and the pipeline has been run previously in the same directory, caches will be used.
 #' @return A Seurat object.
@@ -50,14 +52,15 @@ generate_qc_report <-
            do_timestamp = F,
            do_integration = F,
            integration_col = "sample",
-           final_cluster_annotations = NULL,
+           final_annotations = NULL,
+           final_annotations_lvl = "partition",
            testing = F,
            rerun = F) {
 
   # for internal test runs
-  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_cluster_annotations = NULL;testing=F;rerun=F
+  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F
   # testing: Li filters # remove_doublets=T;min_nuclei_per_gene = 5;min_nCount_RNA = 300;max_nCount_RNA = 10000;min_nFeature_RNA = 200;max_nFeature_RNA = 10000;max_percent_mito = 15
-  # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_cluster_annotations=final_cluster_annotations_list[[experiment]]
+  # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_annotations_lvl="cluster";final_annotations=final_annotations_list[[experiment]][[final_annotations_lvl]]
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY";sublibrary="comb"
   # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5";sublibrary="comb"
   # testing: 8 SLs + pilot # experiment=c("221202_A01366_0326_AHHTTWDMXY","230210_A01366_0351_AHNHCFDSX5");sublibrary=c("SHE5052A9_S101","comb")
@@ -87,7 +90,8 @@ generate_qc_report <-
                do_timestamp = do_timestamp,
                do_integration = do_integration,
                integration_col = integration_col,
-               final_cluster_annotations = final_cluster_annotations,
+               final_annotations = final_annotations,
+               final_annotations_lvl = final_annotations_lvl,
                testing = testing,
                rerun = rerun)
 

@@ -43,7 +43,7 @@ args <- list(
   final_clustering_resolution = 0.3,
   do_integration = F,
   sample_subset = c("N090_V124A", "N090_V127"),
-  final_cluster_annotations = NULL,
+  final_annotations = NULL,
   testing = T,
   rerun = F
 )
@@ -892,7 +892,7 @@ p <-
 p
 ```
 
-```{r singler_annots_alluvial, class.source = 'fold-hide', fig.width = 10, fig.cap = "Alluvial plot of assignment paths of nuclei from samples to clusters to SingleR annotations, coloured by cluster"}
+```{r singler_annots_alluvial, class.source = 'fold-hide', fig.width = 10, fig.cap = "Alluvial plot of assignment paths of nuclei from samples to clusters to partitions to SingleR annotations, coloured by cluster"}
 p <-
   dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
   dplyr::group_by(sample, partition, cluster, singler_annot) %>%
@@ -966,8 +966,7 @@ cell_group_df <-
 # row annotations (study, source)
 row_annotations <-
   df %>% 
-  dplyr::select(-value) %>%
-  dplyr::distinct() %>%
+  dplyr::distinct(unique_module, module, source, study) %>%
   tibble::column_to_rownames("unique_module")
 
 # col annotations (cluster, partition)
@@ -991,17 +990,33 @@ colours <-
 multiple_partitions <- dplyr::n_distinct(cell_group_df$partition) > 1
 ```
 
+```{r consensus_modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of all module scores, collapsed to consensus modules, for all Monocle3 clusters"}
+agg_mat <- 
+  monocle3::aggregate_gene_expression(
+    cds, 
+    gene_group_df %>% dplyr::filter(grepl("^all_", unique_module)), 
+    cell_group_df[, c("cell", "cluster")])
+p <-
+  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
+                     labels_row = row_annotations[rownames(agg_mat), ]$module,
+                     annotation_col = col_annotations,
+                     annotation_colors = colours, border_color = NA,
+                     fontsize = 8)
+p
+```
+
 ```{r modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 agg_mat <- 
-  monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "cluster")])
-agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
-row_annotations_clust <- row_annotations[rownames(agg_mat), ]
-p <- 
+  monocle3::aggregate_gene_expression(
+    cds, 
+    gene_group_df %>% dplyr::filter(!grepl("^all_", unique_module)), 
+    cell_group_df[, c("cell", "cluster")])
+p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations$module,
-                     annotation_row = row_annotations_clust[, c("source", "study")],
+                     labels_row = row_annotations[rownames(agg_mat), ]$module,
+                     annotation_row = row_annotations[rownames(agg_mat), c("source", "study")],
                      annotation_col = col_annotations,
-                     annotation_colors = colours,
+                     annotation_colors = colours, border_color = NA,
                      fontsize = 8)
 p
 ```
@@ -1009,20 +1024,19 @@ p
 ```{r modules_vs_partitions_heatmap, eval = multiple_partitions == T, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "partition")])
-agg_mat <- agg_mat[rowSums(is.na(agg_mat)) == 0, ] 
-row_annotations_part <- row_annotations[rownames(agg_mat), ]
 p <- 
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations$module,
-                     annotation_row = row_annotations_part[, c("source", "study")],
-                     annotation_colors = colours,
+                     labels_row = row_annotations[rownames(agg_mat), ]$module,
+                     annotation_row = row_annotations[rownames(agg_mat), c("source", "study")],
+                     annotation_colors = colours, border_color = NA,
                      fontsize = 8)
 p
 ```
 
 ```{r knit_module_plots, echo = FALSE, warning = F, message = F, results = 'asis'}
 # get available markers
-avail_markers <- get_available_markers(cds, markers)
+consensus_avail_markers <- 
+  list(All = get_available_markers(cds, markers)$All)
 
 to_knit <- c()
 agg_mat <- list()
@@ -1031,52 +1045,64 @@ cell_group_df <- list()
 annotation_colours <- list()
 longest_annot <- list()
 
-for(study in names(avail_markers)) {
+for(study in names(consensus_avail_markers)) {
 
   to_knit <- c(to_knit, '\n', get_subheading(study))
 
-  for(source in names(avail_markers[[study]])) {
+  for(source in names(consensus_avail_markers[[study]])) {
 
-    to_knit <- c(to_knit, get_subsubheading(study, source, avail_markers))
+    to_knit <- c(to_knit, get_subsubheading(study, source, consensus_avail_markers))
     author <- get_author(study)
     chunk_name <- paste(author, substr(source, 1, 3)) %>% janitor::make_clean_names()
 
-    for(lvl in lvls) {
-      
-      chunk_name_lvl <- paste(chunk_name, lvl) %>% janitor::make_clean_names()
-      
-      if (dplyr::n_distinct(SummarizedExperiment::colData(cds)[, lvl]) > 1) {
-        
-        annotations[[chunk_name_lvl]] <- avail_markers[[study]][[source]] %>% purrr::map(dplyr::as_tibble) %>% dplyr::bind_rows(.id = "annotation") %>% dplyr::group_by(value) %>% dplyr::summarise(annotation = paste(annotation, collapse = ", ") %>% substr(1, 100)) %>% dplyr::arrange(annotation) %>% tibble::column_to_rownames("value")
-        annotation_colours[[chunk_name_lvl]] <- list(annotation = c(dittoSeq::dittoColors()[1:dplyr::n_distinct(annotations[[chunk_name_lvl]]$annotation)]) %>% setNames(unique(annotations[[chunk_name_lvl]]$annotation)))
-        cell_group_df[[chunk_name_lvl]] <- tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)), cell_group = SummarizedExperiment::colData(cds)[, lvl])
-        agg_mat[[chunk_name_lvl]] <- monocle3::aggregate_gene_expression(cds[rownames(annotations[[chunk_name_lvl]])], cell_group_df = cell_group_df)
-        longest_annot[[chunk_name_lvl]] <- annotations[[chunk_name_lvl]]$annotation %>% nchar() %>% max()
-        
-        knit_lvl_module_heatmap <- c(
-          '',
-          paste0('```{r ', chunk_name_lvl, '_module_heatmap, class.source = "fold-hide",  warning = F, message = F, fig.dim = c(10, length(unlist(avail_markers[[study]][[source]])) / 6)}'),
-          paste0('p <- pheatmap::pheatmap(agg_mat[["', chunk_name_lvl, '"]], scale = "row", cluster_rows = F, clustering_method = "ward.D2", annotation_row = annotations[["', chunk_name_lvl, '"]], annotation_colors = annotation_colours[["', chunk_name_lvl, '"]], annotation_names_row = F, gaps_row = which(annotations[["', chunk_name_lvl, '"]]$annotation != dplyr::lag(annotations[["', chunk_name_lvl, '"]]$annotation)) - 1, fontsize = 6)'),
-          'p',
-          '```',
-          ''
-          )
-      } else { 
-        knit_lvl_module_heatmap <- paste0("Only one ", lvl, ", so cannot produce a heatmap!\n") 
-      }
-      
-      dev_off_if()
-      knitted_lvl_module_heatmap <- knitr::knit_child(text = knit_lvl_module_heatmap, envir = environment(), quiet = TRUE)
-      dev_off_if()
-      to_knit <- c(to_knit, knitted_lvl_module_heatmap)
-      
-    }
+    # for(lvl in lvls) {
+    #   
+    #   chunk_name_lvl <- paste(chunk_name, lvl) %>% janitor::make_clean_names()
+    #   
+    #   if (dplyr::n_distinct(SummarizedExperiment::colData(cds)[, lvl]) > 1) {
+    #     
+    #     annotations[[chunk_name_lvl]] <- 
+    #       consensus_avail_markers[[study]][[source]] %>% 
+    #       purrr::map(dplyr::as_tibble) %>% 
+    #       dplyr::bind_rows(.id = "annotation") %>% 
+    #       dplyr::mutate(unique_gene = paste(annotation, value) %>% janitor::make_clean_names())  %>% 
+    #       tibble::column_to_rownames("unique_gene")
+    #     annotation_colours[[chunk_name_lvl]] <- 
+    #       list(annotation = c(dittoSeq::dittoColors()[1:dplyr::n_distinct(annotations[[chunk_name_lvl]]$annotation)]) %>%
+    #              setNames(unique(annotations[[chunk_name_lvl]]$annotation)))
+    #     cell_group_df[[chunk_name_lvl]] <- 
+    #       tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)), 
+    #                      cell_group = SummarizedExperiment::colData(cds)[, lvl],
+    #                      partition = monocle3::partitions(cds))
+    #     agg_mat[[chunk_name_lvl]] <- 
+    #       monocle3::aggregate_gene_expression(cds[annotations[[chunk_name_lvl]]$value, ],
+    #                                           cell_group_df = cell_group_df[[chunk_name_lvl]][, c("cell", "cell_group")])
+    #     rownames(agg_mat[[chunk_name_lvl]]) <- rownames(annotations[[chunk_name_lvl]])
+    #     
+    #     knit_lvl_module_heatmap <- c(
+    #       '',
+    #       paste0('```{r ', chunk_name_lvl, '_module_heatmap, class.source = "fold-hide",  warning = F, message = F, fig.dim = c(10, max(length(unlist(consensus_avail_markers[[study]][[source]])) / 6, 3))}'),
+    #       paste0('p <- pheatmap::pheatmap(agg_mat[["', chunk_name_lvl, '"]], scale = "row", cluster_rows = F, clustering_method = "ward.D2", annotation_row = annotations[["', chunk_name_lvl, '"]][, "annotation", drop = F], annotation_col = cell_group_df[["', chunk_name_lvl, '"]][, c("cell_group", "partition")] %>% dplyr::distinct() %>% tibble::column_to_rownames("cell_group"), labels_row = annotations[["', chunk_name_lvl, '"]]$value, annotation_colors = annotation_colours[["', chunk_name_lvl, '"]], annotation_names_row = F, gaps_row = which(annotations[["', chunk_name_lvl, '"]]$annotation != dplyr::lag(annotations[["', chunk_name_lvl, '"]]$annotation)) - 1, fontsize = 6)'),
+    #       'p',
+    #       '```',
+    #       ''
+    #       )
+    #   } else { 
+    #     knit_lvl_module_heatmap <- paste0("Only one ", lvl, ", so cannot produce a heatmap!\n") 
+    #   }
+    #   
+    #   dev_off_if()
+    #   knitted_lvl_module_heatmap <- knitr::knit_child(text = knit_lvl_module_heatmap, envir = environment(), quiet = TRUE)
+    #   dev_off_if()
+    #   to_knit <- c(to_knit, knitted_lvl_module_heatmap)
+    #   
+    # }
   
-    for(ct in names(avail_markers[[study]][[source]])) {
+    for(ct in names(consensus_avail_markers[[study]][[source]])) {
 
       to_knit <- c(to_knit, paste0("\n##### Population: **", ct, "**\n"))
       chunk_name_ct <- paste(chunk_name, ct) %>% janitor::make_clean_names()
-      ct_markers <- avail_markers[[study]][[source]][[ct]]
+      ct_markers <- consensus_avail_markers[[study]][[source]][[ct]]
       n_ct_markers <- length(ct_markers)
 
       if(n_ct_markers < 50) {
@@ -1106,39 +1132,40 @@ cat(unlist(to_knit), sep = '\n')
 
 ## Final cluster annotations
 
-`r if (is.null(final_cluster_annotations)) { "Final celltype annotations of clusters have not been given. Please run the package again and pass celltype labels to the final_cluster_annotations argument to proceed with downstream analysis." }`
+`r if (is.null(final_annotations)) { "Final celltype annotations of clusters have not been given. Please run the package again and pass celltype labels to the final_annotations argument to proceed with downstream analysis." }`
 
-```{r exit_if_no_cts, include = is.null(final_cluster_annotations), eval = is.null(final_cluster_annotations)}
+```{r exit_if_no_cts, include = is.null(final_annotations), eval = is.null(final_annotations)}
 # truncate document if no final celltype annotations have been provided
 knitr::knit_exit()
 ```
 
-```{r final_cluster_annotations, echo = F}
+```{r final_annotations, echo = F}
 # get final cluster annotations
-final_cluster_annotations_df <-
+final_annotations_df <-
   dplyr::left_join(
     tibble::as_tibble(SummarizedExperiment::colData(cds)),
-    tibble::enframe(final_cluster_annotations,
-                    name = "cluster",
-                    value = "final_cluster_annotation"),
-    by = "cluster"
+    tibble::enframe(final_annotations,
+                    name = final_annotations_lvl,
+                    value = "final_annotation"),
+    by = final_annotations_lvl
   )
 # encode in the colData
-SummarizedExperiment::colData(cds)$final_cluster_annotation <-
-  final_cluster_annotations_df$final_cluster_annotation
+SummarizedExperiment::colData(cds)$final_annotation <-
+  final_annotations_df$final_annotation
 ```
 
 ```{r fca_kable, echo = F}
-final_cluster_annotations_df %>%
-  dplyr::group_by(cluster, final_cluster_annotation) %>%
+final_annotations_df %>%
+  dplyr::select(dplyr::all_of(c(final_annotations_lvl, "final_annotation"))) %>%
+  dplyr::group_by(dplyr::across(everything())) %>%
   dplyr::count() %>%
   knitr::kable()
 ```
 
-```{r final_cluster_annotations_dimplot, class.source = 'fold-hide', fig.dim = c(10, 4.5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by final cluster annotation"}
+```{r final_annotations_dimplot, class.source = 'fold-hide', fig.dim = c(10, 4.5), fig.cap = paste("Plot of Monocle3 UMAP, coloured by cluster and by final", final_annotations_lvl, "annotation")}
 p <- 
-  final_umap[["cluster"]] + 
-  dittoSeq::dittoDimPlot(cds, "final_cluster_annotation")
+  final_umap[[final_annotations_lvl]] + 
+  dittoSeq::dittoDimPlot(cds, "final_annotation")
 p
 ```
 
@@ -1146,7 +1173,14 @@ p
 
 # Copy number analysis
 
-## Run inferCNV
+## Run `inferCNV`
+
+`r if ("endothelial" %ni% SummarizedExperiment::colData(cds)$final_annotation) { "inferCNV requires an endothelial cluster as a baseline for CNV analysis, but the final celltype annotations (final_annotations argument) do not include an 'endothelial' cluster. Please run the package again with an 'endothelial' group specified in order to run inferCNV." }`
+
+```{r exit_if_no_endothelial, include = "endothelial" %ni% SummarizedExperiment::colData(cds)$final_annotation, eval = "endothelial" %ni% SummarizedExperiment::colData(cds)$final_annotation}
+# truncate document if no endothelial celltype annotations have been provided
+knitr::knit_exit()
+```
 
 From [**github.com/broadinstitute/inferCNV/wiki**](https://github.com/broadinstitute/inferCNV/wiki)
 
@@ -1154,35 +1188,29 @@ From [**github.com/broadinstitute/inferCNV/wiki**](https://github.com/broadinsti
 >
 > *InferCNV is used to explore tumor single cell RNA-Seq data to identify evidence for somatic large-scale chromosomal copy number alterations, such as gains or deletions of entire chromosomes or large segments of chromosomes. This is done by exploring expression intensity of genes across positions of tumor genome in comparison to a set of reference 'normal' cells. A heatmap is generated illustrating the relative expression intensities across each chromosome, and it often becomes readily apparent as to which regions of the tumor genome are over-abundant or less-abundant as compared to that of normal cells.*
 
-`r if ("endothelial" %ni% SummarizedExperiment::colData(cds)$final_cluster_annotation) { "inferCNV requires an endothelial cluster as a baseline for CNV analysis, but the final celltype annotations of clusters (final_celltype_annotations argument) do not include an 'endothelial' cluster. Please run the package again with an 'endothelial' cluster specified in order to run inferCNV." }`
+We annotate endothelial cells as matched normal and use this to infer copy number variants in the tumour population. Because 3p loss is the canonical founding event for ccRCC, we expect that the tumour cells will be those with 3p loss. Unlike CNVs called from bulk genotyping data, `inferCNV` can also reveal subclonal events in the tumour that only occur in some cell lineages, but not others. 
 
-```{r exit_if_no_endothelial, include = "endothelial" %ni% SummarizedExperiment::colData(cds)$final_cluster_annotation, eval = "endothelial" %ni% SummarizedExperiment::colData(cds)$final_cluster_annotation}
-# truncate document if no endothelial celltype annotations have been provided
-knitr::knit_exit()
-```
-
-We annotate endothelial cells as matched normal and use this to infer copy number variants in the tumour population. 
-
-```{r run_infercnv}
+```{r run_infercnv, eval = F}
 # create infercnv output directory
 dir.create(out$infercnv, showWarnings = F)
 
 # write annotations_file for infercnv
 infercnv_annotations_file <- paste0(out$infercnv, "infercnv_annotations.tsv")
-SummarizedExperiment::colData(cds)[, "final_cluster_annotation", drop = F] %>%
+SummarizedExperiment::colData(cds)[, "final_annotation", drop = F] %>%
   write.table(infercnv_annotations_file, col.names = F, quote = F, sep = "\t")
 
 # create infercnv object
-infercnv_obj <- 
+infercnv_obj <- xfun::cache_rds({
   infercnv::CreateInfercnvObject(
     raw_counts_matrix = cds@assays@data$counts,
     annotations_file = infercnv_annotations_file,
     gene_order_file = "data/gencode/gencode.v43.basic.annotation_clean.bed",
     ref_group_names = c("endothelial")
   )
+}, file = "infercnv_obj.rds", rerun = rerun)
 
 # perform infercnv operations to reveal cnv signal
-infercnv_obj <-
+infercnv_obj <- xfun::cache_rds({
   infercnv::run(
     infercnv_obj,
     cutoff = 1,
@@ -1191,9 +1219,10 @@ infercnv_obj <-
     denoise = T,
     HMM = T
   )
+}, file = "infercnv_obj_processed.rds", rerun = rerun)
 ```
 
-## Run SCEVAN
+## Run `SCEVAN`
 
 From [**github.com/AntonioDeFalco/SCEVAN**](https://github.com/AntonioDeFalco/SCEVAN)
 
@@ -1205,7 +1234,7 @@ From [**github.com/AntonioDeFalco/SCEVAN**](https://github.com/AntonioDeFalco/SC
 dir.create(out$scevan, showWarnings = F)
 ```
 
-`SCEVAN` output will be saved to `r scevan_dir`.
+`SCEVAN` output will be saved to `r out$scevan`.
 
 ```{r run_scevan, message = F, warning = F, eval = F}
 # split counts by sample

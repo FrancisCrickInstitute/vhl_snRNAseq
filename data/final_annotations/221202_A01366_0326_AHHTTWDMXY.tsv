@@ -1,0 +1,7 @@
+group	annotation	lvl
+1	tumour	cluster
+2	tumour	cluster
+3	immune (monocytes)	cluster
+4	tumour	cluster
+5	endothelial	cluster
+6	immune (T cells)	cluster

@@ -6,14 +6,21 @@ get_out <- function(out_dir,
                     do_integration,
                     do_timestamp) {
 
+  collapsed_names <-
+    tibble::tibble(experiment = experiment, sublibrary = sublibrary) %>%
+    dplyr::arrange(dplyr::desc(experiment)) %>%
+    dplyr::summarise(dplyr::across(everything(), ~ paste(.x, collapse = "_x_")))
+
   {
     if (is.null(out_dir))
       # if out_dir not given, use same output structure as in the parse analysis/ directory
+      # standardise combined experiments - sort and combine experiment and sublibrary by descending exp order
       "out/" %>%
-      paste(paste(experiment, collapse = "_x_"),
+      paste(collapsed_names$experiment,
             genome,
-            paste(sublibrary, collapse = "_x_"),
-            parse_analysis_subdir, sep = "/") %>%
+            collapsed_names$sublibrary,
+            parse_analysis_subdir,
+            sep = "/") %>%
       { if (do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/") } %>%
       { if (do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
     else
