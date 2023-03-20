@@ -13,9 +13,11 @@ load_parse_to_seurat <-
            groupings,
            statistics) {
 
-    # testings: # remove_na_samples = F;do_add_sample_metadata = T;do_add_summary_stats = T
+    # testing: # remove_na_samples = F;do_add_sample_metadata = T;do_add_summary_stats = T
 
     seu_ls <- purrr::map2(c(experiment), c(sublibrary), function(exp, sublib) {
+
+      # testing: # exp=experiment[2];sublib=sublibrary[2]
 
       # read in DGE matrix
       sublib_dir <- paste(parse_dir, "/analysis/", exp, genome, sublib, sep = "/")
@@ -104,7 +106,6 @@ load_parse_to_seurat <-
           dplyr::filter(sample %in% sample_subset)
 
       }
-
 
       seu_i
 

@@ -33,8 +33,6 @@ runs <- paste(
 final_samples <-
   readr::read_tsv(paste0(parse_pipeline_dir,
                          "/expdata/230210_A01366_0351_AHNHCFDSX5/sample_metadata.tsv")) %>%
-  # only human samples (removes "^K.*)
-  dplyr::filter(grepl("^N.*", sample)) %>%
   dplyr::pull(sample)
 
 # add 8 SLs + 2 SLs runs (all data combined) (vectorised arguments are collapsed with ',')

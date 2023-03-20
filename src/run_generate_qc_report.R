@@ -39,11 +39,12 @@ setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 
 library(devtools) ; load_all() ;
 
+# testing and cacheing params
 testing = F
 do_timestamp = T
-rerun = F
+rerun = T
 
-# check for final cluster annotations
+# check for final annotations
 if (paste(sort(experiment, T), collapse = "_x_") %in% names(final_annotations_list)) {
   final_annotations_lvl <- names(final_annotations_list[[experiment]])[1]
   final_annotations <- final_annotations_list[[experiment]][[final_annotations_lvl]]

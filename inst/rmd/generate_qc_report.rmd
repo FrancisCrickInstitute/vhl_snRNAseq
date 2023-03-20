@@ -603,7 +603,7 @@ avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colDa
 # plot all groupings vs all reductions
 groupings_vs_reductions <- list()
 purrr::walk(avail_groupings, function(grouping) {
-  purrr::walk(names(cds@reduce_dim_aux), function(redu) {
+  purrr::walk(c("PCA", "UMAP"), function(redu) {
     title <- paste0(redu, "_vs_", grouping)
     p <- 
       monocle3::plot_cells(
@@ -778,11 +778,20 @@ cds_singler <- xfun::cache_rds({
   )
 }, file = "cds_singler.rds", rerun = rerun)
 cds <- xfun::cache_rds({
+  # add singler annotation
   SummarizedExperiment::colData(cds)$singler_annot <- cds_singler %>%
         dplyr::as_tibble() %>%
         dplyr::group_by(labels) %>%
         dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
         dplyr::pull(singler_annot)
+  cds
+  # add celltype annotation cluster labels for plotting
+  SummarizedExperiment::colData(cds)$singler_annot_cluster_label <- 
+    get_singler_annot_label(cds, "cluster")
+  # add celltype annotation partition labels for plotting
+  SummarizedExperiment::colData(cds)$singler_annot_partition_label <-
+    get_singler_annot_label(cds, "partition")
+  # return
   cds
 }, file = "cds_auto_annotated.rds", rerun = rerun)
 ```
@@ -810,30 +819,6 @@ p
 ```
 
 ```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 5, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
-get_singler_annot_label <- function(cds, lvl) {
-  level = lvl
-  dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-  dplyr::mutate(lvl = get(lvl)) %>%
-  dplyr::group_by(lvl, singler_annot) %>%
-  dplyr::count() %>%
-  dplyr::group_by(lvl) %>%
-  dplyr::mutate(total = sum(n),
-                prop = round(n / sum(n) * 100, 0),
-                label = paste0(singler_annot, " (", prop, "%)")) %>%
-  dplyr::filter(prop == max(prop) & prop > 50 | max(prop) < 50 & rank(-prop) <= 2) %>%
-  dplyr::summarise(label = paste0(level, " ", unique(lvl), " (n = ", unique(total), ")\n", paste(label, collapse = "\n"))) %>%
-  {dplyr::left_join(dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>% dplyr::transmute(lvl = get(lvl)), multiple = "all", ., by = "lvl")} %>%
-  dplyr::pull(label)
-}
-
-# add celltype annotation cluster labels for plotting
-SummarizedExperiment::colData(cds)$singler_annot_cluster_label <- 
-  get_singler_annot_label(cds, "cluster")
-
-# add celltype annotation partition labels for plotting
-SummarizedExperiment::colData(cds)$singler_annot_partition_label <-
-  get_singler_annot_label(cds, "partition")
-
 # plot
 p <-
   dittoSeq::dittoDimPlot(cds, "singler_annot", main = "singler annots, cluster-level", size = 0.7) +
@@ -1021,7 +1006,7 @@ p <-
 p
 ```
 
-```{r modules_vs_partitions_heatmap, eval = multiple_partitions == T, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
+```{r modules_vs_partitions_heatmap, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(cds, gene_group_df, cell_group_df[, c("cell", "partition")])
 p <- 
@@ -1132,6 +1117,30 @@ cat(unlist(to_knit), sep = '\n')
 
 ## Final cluster annotations
 
+```{r summarise_annots}
+dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
+  tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group") %>%
+  tidyr::pivot_longer(c("singler_annot", "lesion_type")) %>%
+  dplyr::group_by(cell_grouping, cell_group, name, value) %>%
+  dplyr::count() %>%
+  dplyr::group_by(cell_grouping, cell_group, name) %>%
+  dplyr::mutate(total = sum(n),
+                prop = n / sum(n) * 100,
+                label = paste0(value, " (", round(prop, 0), "%)")) %>%
+  dplyr::filter(prop == max(prop) & prop > 50 | max(prop) < 50 & rank(-prop, ties.method = "min") <= 2) %>%
+  dplyr::arrange(-prop) %>%
+  dplyr::summarise(n = unique(total), value = paste(label, collapse = ", ")) %>%
+  tidyr::pivot_wider() %>%
+  dplyr::left_join(
+    top_cds_markers %>%
+      dplyr::bind_rows(.id = "cell_grouping") %>%
+      dplyr::group_by(cell_grouping, cell_group) %>% 
+      dplyr::summarise(top_markers = paste(gene_id, collapse = ", ")),
+    by = c("cell_group", "cell_grouping")
+  ) %>%
+  knitr::kable()
+```
+
 `r if (is.null(final_annotations)) { "Final celltype annotations of clusters have not been given. Please run the package again and pass celltype labels to the final_annotations argument to proceed with downstream analysis." }`
 
 ```{r exit_if_no_cts, include = is.null(final_annotations), eval = is.null(final_annotations)}
@@ -1217,7 +1226,8 @@ infercnv_obj <- xfun::cache_rds({
     out_dir = out$infercnv,
     cluster_by_groups = T,
     denoise = T,
-    HMM = T
+    HMM = T,
+    resume_mode = rerun
   )
 }, file = "infercnv_obj_processed.rds", rerun = rerun)
 ```
