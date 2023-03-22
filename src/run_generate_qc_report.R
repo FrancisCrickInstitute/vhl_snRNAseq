@@ -18,9 +18,9 @@ base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
                    "/camp/project/tracerX/")
 setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 
-# testing: setwd # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_unfiltered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=NULL;min_nFeature_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=NULL;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations=NULL;final_annotations_lvl="partition";testing=F;rerun=F
-# testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";genome="hg38";sublibrary="SHE5052A9_S101";parse_analysis_subdir="all-well/DGE_filtered";do_integration=F;final_annotations_lvl="cluster";final_annotations=final_annotations_list[[experiment]][[final_annotations_lvl]]
-# testing: full  # experiment="230127_A01366_0343_AHGNCVDMXY";genome="hg38";sublibrary="SHE5052A11_S164";parse_analysis_subdir="all-well/DGE_filtered";do_integration=F
+# testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset=NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F
+# testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_annotations_lvl="cluster";final_annotations=final_annotations_list[[experiment]][[final_annotations_lvl]]
+# testing: 8 SLs + pilot # experiment=c("221202_A01366_0326_AHHTTWDMXY","230210_A01366_0351_AHNHCFDSX5");sublibrary=c("SHE5052A9_S101","comb");sample_subset=strsplit("N045_V008C,N045_V010,N045_V003,N045_V004,N045_N001,N059_V001,N059_M001,N059_V102A,N059_N001,N059_V003,N059_V103,N088_V006,N088_V004,N088_V008,N088_V106,N088_V108,N090_V116,N090_V124D,N090_V126,N090_V127,N090_V124A,N090_V128,N090_N002,K891_V014", ",")[[1]]
 
 # filters from Li et al., 2023 (PMID: 36563681) (snRNAseq paper)
 # min_nCount_RNA = 300
@@ -43,6 +43,7 @@ library(devtools) ; load_all() ;
 testing = F
 do_timestamp = T
 rerun = T
+# testing=F;do_timestamp=F;rerun=F
 
 # check for final annotations
 if (paste(sort(experiment, T), collapse = "_x_") %in% names(final_annotations_list)) {
@@ -54,7 +55,7 @@ if (paste(sort(experiment, T), collapse = "_x_") %in% names(final_annotations_li
 }
 
 # run qc report
-generate_qc_report(
+load_all() ; generate_qc_report(
   parse_dir = paste0(base_dir, "working/VHL_GERMLINE/tidda/parse_pipeline/"),
   experiment = experiment,
   genome = genome,
@@ -74,5 +75,6 @@ generate_qc_report(
   final_annotations = final_annotations,
   final_annotations_lvl = final_annotations_lvl,
   testing = testing,
-  rerun = rerun)
+  rerun = rerun,
+  do_timestamp = do_timestamp)
 

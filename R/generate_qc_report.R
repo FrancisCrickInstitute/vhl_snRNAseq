@@ -63,7 +63,7 @@ generate_qc_report <-
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_annotations_lvl="cluster";final_annotations=final_annotations_list[[experiment]][[final_annotations_lvl]]
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY";sublibrary="comb"
   # testing: 8 SLs # experiment="230210_A01366_0351_AHNHCFDSX5";sublibrary="comb"
-  # testing: 8 SLs + pilot # experiment=c("221202_A01366_0326_AHHTTWDMXY","230210_A01366_0351_AHNHCFDSX5");sublibrary=c("SHE5052A9_S101","comb")
+  # testing: 8 SLs + pilot # experiment=c("221202_A01366_0326_AHHTTWDMXY","230210_A01366_0351_AHNHCFDSX5");sublibrary=c("SHE5052A9_S101","comb");sample_subset=strsplit("N045_V008C,N045_V010,N045_V003,N045_V004,N045_N001,N059_V001,N059_M001,N059_V102A,N059_N001,N059_V003,N059_V103,N088_V006,N088_V004,N088_V008,N088_V106,N088_V108,N090_V116,N090_V124D,N090_V126,N090_V127,N090_V124A,N090_V128,N090_N002,K891_V014", ",")[[1]]
   # testing: args  # library(devtools);load_all(); args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv())
   # testing: args  # args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R") ; args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/"
 
@@ -108,6 +108,26 @@ generate_qc_report <-
                  do_timestamp)
   dir.create(out$base, showWarnings = F, recursive = T)
 
+  # set sample groupings to check at the clustering stage
+  groupings <-
+    c("sample", "percent_mito", "percent_ribo", "percent_globin",
+      "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size", "fuhrman_grade") %>%
+    # if genome is human, do cell cycle scoring (doesn't work with other genomes)
+    { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
+    # if checking for doublets, add to the groupings
+    { if (remove_doublets) c(., "doublet") else . } %>%
+    # if multiple experiments, add to the groupings
+    { if (length(experiment) > 1) c(., "experiment") else . }
+
+  # statistics of interest in the Parse analysis
+  statistics <-
+    c("median_tscp_per_cell",
+      "median_genes_per_cell",
+      "fraction_tscp_in_cells",
+      "cell_tscp_cutoff",
+      "valid_barcode_fraction"
+    )
+
   # save args to output directory
   dput(args, paste0(out$base, "/args_for_generate_qc_report.R"))
 
@@ -116,7 +136,8 @@ generate_qc_report <-
                     knit_root_dir = rprojroot::find_rstudio_root_file(),
                     output_dir = out$base,
                     output_file = "qc_report",
-                    params = list(args, out = out))
+                    params = list(args, out = out,
+                                  groupings = groupings, statistics = statistics))
 
   }
 
