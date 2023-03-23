@@ -1150,41 +1150,49 @@ cat(unlist(to_knit), sep = '\n')
 ## Final cluster annotations
 
 ```{r summarise_annots, echo = F}
-cell_groupings <-
-  dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-  tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group") 
-
-# lesion_types
-cell_groupings %>%
-  dplyr::group_by(cell_grouping, cell_group, lesion_type) %>%
-  dplyr::count() %>% 
-  dplyr::group_by(cell_grouping, cell_group) %>%
-  dplyr::mutate(prop = n / sum(n)) %>%
-  tidyr::pivot_wider(names_from = lesion_type, values_from = prop, id_cols = dplyr::starts_with("cell_group")) %>%
-  dplyr::left_join(
-    # singler_annots
-    cell_groupings %>%
-      tidyr::pivot_longer(dplyr::starts_with("singler_annot_")) %>%
-      dplyr::group_by(cell_grouping, cell_group, name, value) %>%
-      dplyr::count() %>% 
-      dplyr::group_by(cell_grouping, cell_group, name) %>%
-      dplyr::mutate(prop = n / sum(n) * 100,
-                    label = paste0(value, " (", round(prop, ifelse(prop < 1, 1, 0)), "%)")) %>% 
-      dplyr::filter(prop > 10) %>%
-      dplyr::arrange(-prop) %>%
-      dplyr::summarise(value = paste(label, collapse = ", ")) %>%
-      tidyr::pivot_wider(),
-    by = c("cell_grouping", "cell_group")
-  ) %>%
-  dplyr::left_join(
-    # top_cds_markers
-    top_cds_markers %>%
-      dplyr::bind_rows(.id = "cell_grouping") %>%
-      dplyr::group_by(cell_grouping, cell_group) %>% 
-      dplyr::summarise(top_markers = paste(gene_id, collapse = ", ")),
-    by = c("cell_grouping", "cell_group")
-  ) %>%
-  knitr::kable(digits = 3)
+cell_groupings_summary <- xfun::cache_rds({
+  cell_groupings <-
+    dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
+    tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group") 
+  # counts
+  cell_groupings %>% 
+    dplyr::group_by(cell_grouping, cell_group) %>%
+    dplyr::count() %>%
+    dplyr::left_join(
+      # lesion_types
+      cell_groupings %>%
+        dplyr::group_by(cell_grouping, cell_group, lesion_type) %>%
+        dplyr::count() %>% 
+        dplyr::group_by(cell_grouping, cell_group) %>%
+        dplyr::mutate(prop = n / sum(n)) %>%
+        tidyr::pivot_wider(names_from = lesion_type, values_from = prop, id_cols = dplyr::starts_with("cell_group")),
+      by = c("cell_grouping", "cell_group")
+    ) %>%
+    dplyr::left_join(
+      # singler_annots
+      cell_groupings %>%
+        tidyr::pivot_longer(dplyr::starts_with("singler_annot_")) %>%
+        dplyr::group_by(cell_grouping, cell_group, name, value) %>%
+        dplyr::count() %>% 
+        dplyr::group_by(cell_grouping, cell_group, name) %>%
+        dplyr::mutate(prop = n / sum(n) * 100,
+                      label = paste0(value, " (", round(prop, ifelse(prop < 1, 1, 0)), "%)")) %>% 
+        dplyr::filter(prop > 10) %>%
+        dplyr::arrange(-prop) %>%
+        dplyr::summarise(value = paste(label, collapse = ", ")) %>%
+        tidyr::pivot_wider(),
+      by = c("cell_grouping", "cell_group")
+    ) %>%
+    dplyr::left_join(
+      # top_cds_markers
+      top_cds_markers %>%
+        dplyr::bind_rows(.id = "cell_grouping") %>%
+        dplyr::group_by(cell_grouping, cell_group) %>% 
+        dplyr::summarise(top_markers = paste(gene_id, collapse = ", ")),
+      by = c("cell_grouping", "cell_group")
+    )
+}, file = "cell_groupings_summary.rds", rerun = rerun)
+knitr::kable(cell_groupings_summary, digits = 3)
 ```
 
 `r if (is.null(final_annotations)) { "Final celltype annotations of clusters have not been given. Please run the package again and pass celltype labels to the final_annotations argument to proceed with downstream analysis." }`

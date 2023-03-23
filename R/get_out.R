@@ -6,10 +6,12 @@ get_out <- function(out_dir,
                     do_integration,
                     do_timestamp) {
 
-  collapsed_names <-
-    tibble::tibble(experiment = experiment, sublibrary = sublibrary) %>%
-    dplyr::arrange(dplyr::desc(experiment)) %>%
-    dplyr::summarise(dplyr::across(everything(), ~ paste(.x, collapse = "_x_")))
+  if (is.null(out_dir)) {
+    collapsed_names <-
+      tibble::tibble(experiment = experiment, sublibrary = sublibrary) %>%
+      dplyr::arrange(dplyr::desc(experiment)) %>%
+      dplyr::summarise(dplyr::across(everything(), ~ paste(.x, collapse = "_x_")))
+  }
 
   {
     if (is.null(out_dir))
