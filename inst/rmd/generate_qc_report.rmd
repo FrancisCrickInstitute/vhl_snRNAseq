@@ -59,6 +59,7 @@ list2env(args, globalenv())
 
 # set seed for repeatability
 set.seed(42)
+random_seed = 42
 
 # gridExtra, clustree, monocle3 must be loaded in the environment (due to package-specific bugs)
 library(clustree)
@@ -501,10 +502,12 @@ cat("No value was provided for `n_dims`, so dimensionality will be calculated us
 The dimensionality of the dataset can be estimated using the `intrinsicDimension` package. This bypasses the manual approach of reading the elbow plot, but can sometimes be a bit too conservative. Therefore, if `n_dims` is not defined by the user, the dimensionality is set as double the `intrinsicDimension` estimate. 
 
 ```{r iD_n_dims}
-n_dims_iD <- intrinsicDimension::maxLikGlobalDimEst(
+n_dims_iD <- xfun::cache_rds({
+  intrinsicDimension::maxLikGlobalDimEst(
     seu@reductions$pca@cell.embeddings,
     k = 10
   )$dim.est %>% round(0)
+}, file = "n_dims_iD.rds", rerun = rerun)
 generous_n_dims <- round(2 * n_dims_iD, 0)
 ```
 
@@ -580,7 +583,7 @@ Plotting all different groupings of the data onto the reductions can help reveal
 avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colData(cds))]
 ```
 
-```{r groupings_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, 30), fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
+```{r groupings_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, 35), fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
 # fig.dim = get_fig_dims(length(avail_groupings) * (length(cds@reduce_dim_aux) + 1), n_cols = length(cds@reduce_dim_aux) + 1), 
 # plot all groupings vs all reductions
 redus <- c("PCA", "UMAP")
@@ -653,12 +656,23 @@ We can now cluster the cells. Monocle3 does not require a user-defined clusterin
 ```{r cluster_cells}
 lvls <- c("cluster", "partition")
 cds <- xfun::cache_rds({
-  cds <- monocle3::cluster_cells(cds)
+  cds <- monocle3::cluster_cells(cds, random_seed = random_seed)
   # add it to the colData
   SummarizedExperiment::colData(cds)$cluster <- monocle3::clusters(cds)
   SummarizedExperiment::colData(cds)$partition <- monocle3::partitions(cds)
   cds
 }, file = "cds_clustered.rds", rerun = rerun) 
+```
+
+`Monocle3` has estimated the optimum clustering resolution for the dataset to be **`r optim_res`**.
+
+```{r clustering_tree, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Clustering tree from partitions (grouping 1) to clusters (grouping 2) of cells"}
+library(clustree)
+p <-
+  data.frame("grouping1" = monocle3::partitions(cds),
+             "grouping2" = monocle3::clusters(cds)) %>%
+    clustree::clustree(prefix = "grouping")
+p
 ```
 
 ```{r clusters_and_partitions, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Plot of Monocle3 UMAP, coloured by cluster and by partition"}
@@ -753,89 +767,92 @@ Some annotations will contain very few nuclei. These are usually not of interest
 
 ```{r singler_annots, message = F, warning = F}
 cds_singler <- xfun::cache_rds({
-  human_primary_ref <- celldex::HumanPrimaryCellAtlasData()
-  SingleR::SingleR(
+  singler_refs <- celldex::BlueprintEncodeData()
+  cds_singler <- SingleR::SingleR(
     test = cds@assays@data$counts,
-    ref = human_primary_ref,
-    labels = human_primary_ref$label.main
-  )
+    ref = singler_refs,
+    labels = colnames(singler_refs))
+  cds_singler
 }, file = "cds_singler.rds", rerun = rerun)
 cds <- xfun::cache_rds({
   # add singler annotation
-  SummarizedExperiment::colData(cds)$singler_annot <- cds_singler %>%
-        dplyr::as_tibble() %>%
-        dplyr::group_by(labels) %>%
-        dplyr::transmute(singler_annot = replace(labels, dplyr::n() < 10, "none")) %>%
-        dplyr::pull(singler_annot)
-  cds
-  # add celltype annotation cluster labels for plotting
-  SummarizedExperiment::colData(cds)$singler_annot_cluster_label <- 
-    get_singler_annot_label(cds, "cluster")
-  # add celltype annotation partition labels for plotting
-  SummarizedExperiment::colData(cds)$singler_annot_partition_label <-
-    get_singler_annot_label(cds, "partition")
+  SummarizedExperiment::colData(cds) <- 
+    SummarizedExperiment::colData(cds) %>%
+    cbind(
+      cds_singler %>%
+    dplyr::as_tibble() %>%
+    dplyr::select(singler_annot_fine = labels) %>%
+    dplyr::group_by(singler_annot_fine) %>%
+    dplyr::left_join(
+      SummarizedExperiment::colData(singler_refs) %>%
+        tibble::as_tibble(rownames = "singler_annot_fine") %>%
+        dplyr::select(singler_annot_fine, singler_annot_main = label.main))
+    )
+  # add main/fine labels for partitions/clusters
+  for (lvl in c("cluster", "partition")) {
+    for (annot in c("singler_annot_fine", "singler_annot_main")) {
+      SummarizedExperiment::colData(cds)[, paste(lvl, annot, sep = "_")] <-
+        get_singler_annot_label(cds, annot, lvl)
+    }
+  }
   # return
   cds
-}, file = "cds_auto_annotated.rds", rerun = rerun)
+}, file = "cds_singler_annotated.rds", rerun = rerun)
 ```
 
-```{r singler_annots_heatmap, class.source = 'fold-hide', fig.width = 10, fig.cap = "Heatmap of celltype annotation scores from SingleR"}
-annotation_col <- data.frame(cluster = SummarizedExperiment::colData(cds)$cluster,
-                             partition = SummarizedExperiment::colData(cds)$partition)
+```{r singler_annot_fine_heatmap, class.source = 'fold-hide', fig.width = 10, fig.cap = "Heatmap of fine celltype annotation scores from SingleR"}
+annotation_col <- 
+  SummarizedExperiment::colData(cds)[, c("cluster", "partition", "singler_annot_main")] %>% 
+  as.data.frame()
 if (dplyr::n_distinct(SummarizedExperiment::colData(cds)$nih_pid, na.rm = T) > 1) {
   annotation_col$nih_pid <- SummarizedExperiment::colData(cds)$nih_pid
 }
 if (dplyr::n_distinct(SummarizedExperiment::colData(cds)$lesion_type, na.rm = T) > 1) {
   annotation_col$lesion_type <- SummarizedExperiment::colData(cds)$lesion_type
 }
+cds_singler$main_labels <- SummarizedExperiment::colData(cds)$singler_annot_main
 p <-
   SingleR::plotScoreHeatmap(
-    cbind(cds_singler, SummarizedExperiment::colData(cds)$partition), 
-    annotation_col = annotation_col)
+    cds_singler, 
+    show.labels = F,
+    annotation_col = annotation_col,
+    fontsize_row = 7)
 p
 ```
 
-```{r singler_annots_delta, class.source = 'fold-hide', results = F, warning = F, message = F, fig.cap = "Delta distribution of celltype annotations from SingleR"}
-p <-
-  SingleR::plotDeltaDistribution(cds_singler)
-p
-```
-
-```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 5, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
-# plot
-p <-
-  dittoSeq::dittoDimPlot(cds, "singler_annot", main = "singler annots, cluster-level", size = 0.7) +
-  ggrepel::geom_label_repel(
-    data = dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-      dplyr::right_join(get_centroids(cds, "UMAP", "cluster"), by = "cluster") %>%
-      dplyr::distinct(cluster, singler_annot_cluster_label, x, y),
-    ggplot2::aes(x, y, label = singler_annot_cluster_label),
-    min.segment.length = 0,
-    size = 2, fill = 'white', alpha = 0.8, seed = 1234, label.size = NA
-  ) +
-  umap_void_theme +
-  ggplot2::theme(legend.position = "bottom") +
-  dittoSeq::dittoDimPlot(cds, "singler_annot", main = "singler annots, partition-level", size = 0.7) +
-  ggrepel::geom_label_repel(
-    data = dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-      dplyr::right_join(get_centroids(cds, "UMAP", "partition"), by = "partition") %>%
-      dplyr::distinct(partition, singler_annot_partition_label, x, y),
-    ggplot2::aes(x, y, label = singler_annot_partition_label),
-    min.segment.length = 0,
-    size = 1.5, fill = 'white', alpha = 0.8, seed = 1234, label.size = NA
-  ) +
-  umap_void_theme +
-  dittoSeq::dittoDimPlot(cds, "lesion_type", size = 0.7) +
-  umap_void_theme + 
-  ggplot2::theme(legend.position = "bottom")
-p
+```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 8, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
+p <- list()
+purrr::walk(c("cluster", "partition"), function(lvl) {
+  purrr::walk(c("singler_annot_fine", "singler_annot_main"), function(annot) {
+    label_col <- paste(lvl, annot, sep = "_")
+    p_i <-
+      dittoSeq::dittoDimPlot(cds, annot, main = gsub("_", " ", label_col), size = 0.7) +
+      ggrepel::geom_label_repel(
+        data = 
+          dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
+          dplyr::select(dplyr::all_of(c(lvl, label_col))) %>%
+          dplyr::right_join(get_centroids(cds, "UMAP", lvl), by = lvl) %>%
+          dplyr::distinct(),
+        ggplot2::aes(x, y, label = get(label_col)),
+        min.segment.length = 0,
+        size = 1.5, fill = 'white', alpha = 0.8, seed = 1234, label.size = NA
+      ) 
+    p[[paste0("legend_", annot)]] <<- lemon::g_legend(p_i)
+    p[[label_col]] <<- p_i + umap_void_theme 
+  })
+}) 
+design <- "
+122443
+155663
+"
+patchwork::wrap_plots(p, design = design)
 ```
 
 ```{r singler_annots_bar, class.source = 'fold-hide', fig.cap = "Plot of SingleR annotation composition of samples"}
 p <-
   dittoSeq::dittoBarPlot(
   cds,
-  var = "singler_annot",
+  var = "singler_annot_main",
   group.by = "sample",
   scale = "count",
   main = "",
@@ -844,7 +861,7 @@ p <-
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, size = 5),
                  legend.text = ggplot2::element_text(size = 5)) +
   dittoSeq::dittoBarPlot(cds,
-                         var = "singler_annot",
+                         var = "singler_annot_main",
                          group.by = "cluster",
                          scale = "count",
                          main = "") +
@@ -863,15 +880,16 @@ p
 ```{r singler_annots_alluvial, class.source = 'fold-hide', fig.width = 10, fig.cap = "Alluvial plot of assignment paths of nuclei from samples to clusters to partitions to SingleR annotations, coloured by cluster"}
 p <-
   dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-  dplyr::group_by(sample, partition, cluster, singler_annot) %>%
+  dplyr::group_by(sample, partition, cluster, singler_annot_main) %>%
   dplyr::count() %>%
   dplyr::ungroup() %>%
   ggforce::gather_set_data(1:4) %>%
   dplyr::mutate(x = dplyr::case_when(x == 1 ~ "sample",
                                      x == 2 ~ "partition",
                                      x == 3 ~ "cluster",
-                                     x == 4 ~ "singler_annotation") %>%
-                  factor(levels = c("sample", "partition", "cluster", "singler_annotation"))) %>%
+                                     x == 4 ~ "singler_annot_main") %>%
+                  factor(levels = c("sample", "partition", "cluster", 
+                                    "singler_annot_main"))) %>%
   ggplot2::ggplot(ggplot2::aes(
                     x = x,
                     id = id,
@@ -888,7 +906,7 @@ p <-
                                        rep(-0.3, dplyr::n_distinct(SummarizedExperiment::colData(cds)$sample)),
                                        rep(0, dplyr::n_distinct(SummarizedExperiment::colData(cds)$partition)),
                                        rep(0, dplyr::n_distinct(SummarizedExperiment::colData(cds)$cluster)),
-                                       rep(0.4, dplyr::n_distinct(SummarizedExperiment::colData(cds)$singler_annot))
+                                       rep(0.4, dplyr::n_distinct(SummarizedExperiment::colData(cds)$singler_annot_main))
                                      )) +
   ggplot2::theme_void() +
   ggplot2::theme(legend.position = "none",
@@ -903,7 +921,7 @@ p
 avail_markers <- get_available_markers(cds, markers)
 ```
 
-Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC.  
+Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC. 
 
 ```{r all_modules_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 df <- 
@@ -958,11 +976,13 @@ colours <-
 multiple_partitions <- dplyr::n_distinct(cell_group_df$partition) > 1
 ```
 
+#### Study-specific modules vs clusters
+
 ```{r modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(
     cds, 
-    gene_group_df %>% dplyr::filter(!grepl("^all_", unique_module)), 
+    gene_group_df %>% dplyr::filter(!grepl("consensus", unique_module)), 
     cell_group_df[, c("cell", "cluster")])
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
@@ -974,11 +994,13 @@ p <-
 p
 ```
 
+#### Consensus modules vs clusters
+
 ```{r consensus_modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of all module scores, collapsed to consensus modules, for all Monocle3 clusters"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(
     cds, 
-    gene_group_df %>% dplyr::filter(grepl("^all_", unique_module)), 
+    gene_group_df %>% dplyr::filter(grepl("consensus", unique_module)), 
     cell_group_df[, c("cell", "cluster")])
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
@@ -989,11 +1011,45 @@ p <-
 p
 ```
 
+#### Consensus modules vs partitions
+
 ```{r consensus_modules_vs_partitions_heatmap, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of all module scores, collapsed to consensus modules, for all Monocle3 partitions"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(
     cds, 
-    gene_group_df %>% dplyr::filter(grepl("^all_", unique_module)), 
+    gene_group_df %>% dplyr::filter(grepl("consensus", unique_module)), 
+    cell_group_df[, c("cell", "partition")])
+p <-
+  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
+                     labels_row = row_annotations[rownames(agg_mat), ]$module,
+                     annotation_colors = colours, border_color = NA,
+                     fontsize = 8)
+p
+```
+
+#### Balzer modules vs clusters
+
+```{r balzer_modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of Balzer module scores for all Monocle3 clusters"}
+agg_mat <- 
+  monocle3::aggregate_gene_expression(
+    cds, 
+    gene_group_df %>% dplyr::filter(grepl("balzer", unique_module)), 
+    cell_group_df[, c("cell", "cluster")])
+p <-
+  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
+                     labels_row = row_annotations[rownames(agg_mat), ]$module,
+                     annotation_colors = colours, border_color = NA,
+                     fontsize = 8)
+p
+```
+
+#### Balzer modules vs partitions
+
+```{r balzer_modules_vs_partitions_heatmap, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of Balzer module scores for all Monocle3 partitions"}
+agg_mat <- 
+  monocle3::aggregate_gene_expression(
+    cds, 
+    gene_group_df %>% dplyr::filter(grepl("balzer", unique_module)), 
     cell_group_df[, c("cell", "partition")])
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
@@ -1006,7 +1062,7 @@ p
 ```{r knit_module_plots, echo = FALSE, warning = F, message = F, results = 'asis'}
 # get available markers
 consensus_avail_markers <- 
-  list(All = get_available_markers(cds, markers)$All)
+  list(consensus = get_available_markers(cds, markers)$consensus)
 
 to_knit <- c()
 agg_mat <- list()
@@ -1094,29 +1150,41 @@ cat(unlist(to_knit), sep = '\n')
 ## Final cluster annotations
 
 ```{r summarise_annots, echo = F}
-dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-  tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group") %>%
-  tidyr::pivot_longer(c("singler_annot", "lesion_type")) %>%
-  dplyr::group_by(cell_grouping, cell_group, name, value) %>%
-  dplyr::count() %>%
-  dplyr::group_by(cell_grouping, cell_group, name) %>%
-  dplyr::mutate(total = sum(n),
-                prop = n / sum(n) * 100,
-                label = paste0(value, " (", round(prop, 0), "%)")) %>%
-  dplyr::filter(prop == max(prop) & prop > 50 | 
-                  max(prop) < 50 & rank(-prop, ties.method = "min") <= 2 | 
-                  name == "lesion_type") %>%
-  dplyr::arrange(-prop) %>%
-  dplyr::summarise(n = unique(total), value = paste(label, collapse = ", ")) %>%
-  tidyr::pivot_wider() %>%
+cell_groupings <-
+  dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
+  tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group") 
+
+# lesion_types
+cell_groupings %>%
+  dplyr::group_by(cell_grouping, cell_group, lesion_type) %>%
+  dplyr::count() %>% 
+  dplyr::group_by(cell_grouping, cell_group) %>%
+  dplyr::mutate(prop = n / sum(n)) %>%
+  tidyr::pivot_wider(names_from = lesion_type, values_from = prop, id_cols = dplyr::starts_with("cell_group")) %>%
   dplyr::left_join(
+    # singler_annots
+    cell_groupings %>%
+      tidyr::pivot_longer(dplyr::starts_with("singler_annot_")) %>%
+      dplyr::group_by(cell_grouping, cell_group, name, value) %>%
+      dplyr::count() %>% 
+      dplyr::group_by(cell_grouping, cell_group, name) %>%
+      dplyr::mutate(prop = n / sum(n) * 100,
+                    label = paste0(value, " (", round(prop, ifelse(prop < 1, 1, 0)), "%)")) %>% 
+      dplyr::filter(prop > 10) %>%
+      dplyr::arrange(-prop) %>%
+      dplyr::summarise(value = paste(label, collapse = ", ")) %>%
+      tidyr::pivot_wider(),
+    by = c("cell_grouping", "cell_group")
+  ) %>%
+  dplyr::left_join(
+    # top_cds_markers
     top_cds_markers %>%
       dplyr::bind_rows(.id = "cell_grouping") %>%
       dplyr::group_by(cell_grouping, cell_group) %>% 
       dplyr::summarise(top_markers = paste(gene_id, collapse = ", ")),
-    by = c("cell_group", "cell_grouping")
+    by = c("cell_grouping", "cell_group")
   ) %>%
-  knitr::kable()
+  knitr::kable(digits = 3)
 ```
 
 `r if (is.null(final_annotations)) { "Final celltype annotations of clusters have not been given. Please run the package again and pass celltype labels to the final_annotations argument to proceed with downstream analysis." }`

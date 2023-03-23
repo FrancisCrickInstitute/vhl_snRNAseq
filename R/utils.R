@@ -293,16 +293,16 @@ get_fig_dims <- function(n_plots, n_cols = NULL, grid_width = 10, height_to_widt
 }
 
 # Get singler annot labels for plotting
-get_singler_annot_label <- function(cds, lvl) {
+get_singler_annot_label <- function(cds, annot, lvl) {
   level = lvl
   dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-    dplyr::mutate(lvl = get(lvl)) %>%
-    dplyr::group_by(lvl, singler_annot) %>%
+    dplyr::mutate(lvl = get(lvl), annot = get(annot)) %>%
+    dplyr::group_by(lvl, annot) %>%
     dplyr::count() %>%
     dplyr::group_by(lvl) %>%
     dplyr::mutate(total = sum(n),
                   prop = n / sum(n) * 100,
-                  label = paste0(singler_annot, " (", round(prop, 0), "%)")) %>%
+                  label = paste0(annot, " (", round(prop, 0), "%)")) %>%
     dplyr::filter(prop == max(prop) & prop > 50 | max(prop) < 50 & rank(-prop, ties.method = "min") <= 2) %>%
     dplyr::arrange(-prop) %>%
     dplyr::summarise(label = paste0(level, " ", unique(lvl), " (n = ", unique(total), ")\n", paste(label, collapse = "\n"))) %>%
