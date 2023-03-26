@@ -7,6 +7,7 @@
 #' @param parse_analysis_subdir Parse Biosciences split-pipe DGE subdirectory. This directory must contain `DGE.mtx`, `all_genes.csv`, and `cell_metadata.csv` files. This will indicate which wells to include and whether to use the `DGE_filtered/` or `DGE_unfiltered/` matrix. Default is "all-well/DGE_filtered/".
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
+#' @param do_cell_cycle_scoring If `TRUE`, scores cells by cell cycle stage. 
 #' @param min_nuclei_per_gene \emph{Gene filter}. The minimum number of nuclei in which a gene must be present. Genes that are present in very few nuclei are uninformative and unlikely to help in differentiating groups of nuclei. In general, most genes removed by this filtering will be those not detected in any nucleus.
 #' @param min_nCount_RNA \emph{Nucleus filter}. The minimum number of transcripts detected per nucleus.
 #' @param max_nCount_RNA \emph{Nucleus filter}. The maximum number of transcripts detected per nucleus. An unusually high number of RNA molecules suggests that the nucleus is a multiplet.
@@ -18,7 +19,9 @@
 #' @param cluster_resolutions Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.
 #' @param final_clustering_resolution Optional. The chosen clustering resolution of the dataset to use for downstream analysis. This is the resolution at which clusters appear to capture true biological groupings of interest in the dataset. This can be decided by consulting the clustering tree. If no value given, downstream analysis will not proceed.
 #' @param out_dir Optional. Output directory. If no value given, the output will be saved to `out/{experiment}/{genome}/{sublibrary}/{parse_analysis_subdir}/{integrated,unintegrated}`.
+#' @param out_subdir Optional. Name of a subdirectory within the automatically generated output path to save output to. 
 #' @param sample_subset Optional. Vector of sample IDs to subset to.
+#' @param cell_subset Optional. Vector of cell IDs to subset to. 
 #' @param do_timestamp If `TRUE`, will save the output to a time-stamped subdirectory (e.g. `20230217_105554/`).
 #' @param do_integration If `TRUE`, will integrate the dataset and save the output to `integrated/` subdirectory. If `FALSE` (default), output will save to `unintegrated/` subdirectory.
 #' @param integration_col If `do_integration` is `TRUE`, Seurat metadata column upon which to integrate the dataset.
@@ -37,6 +40,7 @@ generate_qc_report <-
            parse_analysis_subdir = "all-well/DGE_filtered/",
            do_filtering = T,
            remove_doublets = T,
+           do_cell_cycle_scoring = T,
            min_nuclei_per_gene = 5,
            min_nCount_RNA = NULL,
            max_nCount_RNA = NULL,
@@ -48,7 +52,9 @@ generate_qc_report <-
            clustering_resolutions = seq(0.1, 0.8, by = 0.1),
            final_clustering_resolution = NULL,
            out_dir = NULL,
+           out_subdir = NULL,
            sample_subset = NULL,
+           cell_subset = NULL,
            do_timestamp = F,
            do_integration = F,
            integration_col = "sample",
@@ -58,7 +64,7 @@ generate_qc_report <-
            rerun = F) {
 
   # for internal test runs
-  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F
+  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;out_subdir=NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F
   # testing: Li filters # remove_doublets=T;min_nuclei_per_gene = 5;min_nCount_RNA = 300;max_nCount_RNA = 10000;min_nFeature_RNA = 200;max_nFeature_RNA = 10000;max_percent_mito = 15
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_annotations_lvl="cluster";final_annotations=final_annotations_list[[experiment]][[final_annotations_lvl]]
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY";sublibrary="comb"
@@ -86,7 +92,9 @@ generate_qc_report <-
                clustering_resolutions = clustering_resolutions,
                final_clustering_resolution = final_clustering_resolution,
                out_dir = out_dir,
+               out_subdir = out_subdir,
                sample_subset = sample_subset,
+               cell_subset = cell_subset,
                do_timestamp = do_timestamp,
                do_integration = do_integration,
                integration_col = integration_col,
@@ -100,6 +108,7 @@ generate_qc_report <-
 
   # define output directory
   out <- get_out(out_dir,
+                 out_subdir,
                  experiment,
                  genome,
                  sublibrary,

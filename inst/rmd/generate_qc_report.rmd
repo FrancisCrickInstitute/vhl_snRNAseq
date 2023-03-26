@@ -79,7 +79,7 @@ knitr::opts_chunk$set(fig.align = "center",
 # Run info {-}
 
 ```{r args, echo = F}
-knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(paste, collapse = ", ") %>% unlist))
+knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(paste, collapse = ", ") %>% unlist %>% substr(1, 50)))
 ```
 
 # Output info {-}
@@ -110,6 +110,7 @@ seu <- xfun::cache_rds({
     min_nFeature_RNA = 0,
     min_nuclei_per_gene = min_nuclei_per_gene,
     sample_subset = sample_subset,
+    cell_subset = cell_subset,
     remove_na_samples = T,
     do_add_sample_metadata = T,
     do_add_summary_stats = T,
@@ -433,7 +434,7 @@ seu <- xfun::cache_rds({
 
 Nuclei are assigned a score representing the likelihood that they are in each phase of the cell cycle. This is based on the expression levels of genes associated with each phase. The highest probability phase of each nucleus is stored in a new "Phase" column of the metadata.
 
-```{r annotate_cell_cycle_phases}
+```{r annotate_cell_cycle_phases, eval = do_cell_cycle_scoring == T}
 seu <- Seurat::CellCycleScoring(
   seu,
   s.features = Seurat::cc.genes$s.genes,
@@ -550,8 +551,10 @@ cds <- xfun::cache_rds({
   cds <- SeuratWrappers::as.cell_data_set(seu_filtered, assay = "RNA")
   SummarizedExperiment::rowData(cds)$gene_short_name <- 
     row.names(SummarizedExperiment::rowData(cds))
-  SummarizedExperiment::colData(cds)$Phase <- 
-    seu$Phase
+  if (do_cell_cycle_scoring == T) {
+    SummarizedExperiment::colData(cds)$Phase <-
+      seu$Phase
+  }
   cds
 }, file = "cds.rds", rerun = rerun)
 ```
@@ -658,13 +661,11 @@ lvls <- c("cluster", "partition")
 cds <- xfun::cache_rds({
   cds <- monocle3::cluster_cells(cds, random_seed = random_seed)
   # add it to the colData
-  SummarizedExperiment::colData(cds)$cluster <- monocle3::clusters(cds)
-  SummarizedExperiment::colData(cds)$partition <- monocle3::partitions(cds)
+  SummarizedExperiment::colData(cds)$cluster <- as.factor(monocle3::clusters(cds))
+  SummarizedExperiment::colData(cds)$partition <- as.factor(monocle3::partitions(cds))
   cds
 }, file = "cds_clustered.rds", rerun = rerun) 
 ```
-
-`Monocle3` has estimated the optimum clustering resolution for the dataset to be **`r optim_res`**.
 
 ```{r clustering_tree, class.source = 'fold-hide', fig.dim = c(10, 5), fig.cap = "Clustering tree from partitions (grouping 1) to clusters (grouping 2) of cells"}
 library(clustree)
@@ -820,7 +821,7 @@ p <-
 p
 ```
 
-```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 8, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
+```{r umap_vs_singler_annots, class.source = 'fold-hide', results = F, fig.width = 10, fig.height = 10, fig.cap = "Plot of UMAP clusters, coloured by SingleR annotation and labelled by the major SingleR annotation(s) per cluster"}
 p <- list()
 purrr::walk(c("cluster", "partition"), function(lvl) {
   purrr::walk(c("singler_annot_fine", "singler_annot_main"), function(annot) {
@@ -837,15 +838,10 @@ purrr::walk(c("cluster", "partition"), function(lvl) {
         min.segment.length = 0,
         size = 1.5, fill = 'white', alpha = 0.8, seed = 1234, label.size = NA
       ) 
-    p[[paste0("legend_", annot)]] <<- lemon::g_legend(p_i)
     p[[label_col]] <<- p_i + umap_void_theme 
   })
 }) 
-design <- "
-122443
-155663
-"
-patchwork::wrap_plots(p, design = design)
+patchwork::wrap_plots(p)
 ```
 
 ```{r singler_annots_bar, class.source = 'fold-hide', fig.cap = "Plot of SingleR annotation composition of samples"}
@@ -918,7 +914,7 @@ p
 ### Manual celltype annotation using curated literature markers
 
 ```{r cds_avail_markers, echo = F}
-avail_markers <- get_available_markers(cds, markers)
+avail_markers <- markers %>% purrr::map(intersect, rownames(cds))
 ```
 
 Literature markers for celltypes of interest in VHL ccRCC tumours were gathered from previous sc/snRNAseq studies of sporadic ccRCC. 
@@ -926,12 +922,10 @@ Literature markers for celltypes of interest in VHL ccRCC tumours were gathered 
 ```{r all_modules_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 df <- 
   avail_markers %>%
-  purrr::map(purrr::map, purrr::map, dplyr::as_tibble) %>% 
-  purrr::map(purrr::map, dplyr::bind_rows, .id = "module") %>%
-  purrr::map(dplyr::bind_rows, .id = "source") %>%
-  dplyr::bind_rows(.id = "study") %>%
+  purrr::map(dplyr::as_tibble) %>%
+  dplyr::bind_rows(.id = "module") %>%
   dplyr::distinct() %>%
-  dplyr::mutate(unique_module = paste(study, substr(source, 1, 3), module) %>% janitor::make_clean_names(allow_dupes = T)) %>%
+  dplyr::mutate(unique_module = module) %>%
   dplyr::group_by(unique_module) %>%
   dplyr::mutate(module_size = dplyr::n_distinct(value),
                 module = paste0("(", module_size, ") ", module)) %>%
@@ -949,12 +943,6 @@ cell_group_df <-
     cluster = monocle3::clusters(cds),
     partition = monocle3::partitions(cds))
 
-# row annotations (study, source)
-row_annotations <-
-  df %>% 
-  dplyr::distinct(unique_module, module, source, study) %>%
-  tibble::column_to_rownames("unique_module")
-
 # col annotations (cluster, partition)
 col_annotations <-
   cell_group_df %>%
@@ -963,9 +951,7 @@ col_annotations <-
 
 # get row and col annotation colours
 colours <- 
-  list(source = row_annotations$source,
-       study = row_annotations$study,
-       partition = col_annotations$partition) %>%
+  list(partition = col_annotations$partition) %>%
   purrr::map(function(i) {
     dittoSeq::dittoColors()[1:length(unique(i))] %>%
       setNames(unique(i))
@@ -974,37 +960,19 @@ colours <-
 
 # check if >1 partition
 multiple_partitions <- dplyr::n_distinct(cell_group_df$partition) > 1
+multiple_clusters <- dplyr::n_distinct(cell_group_df$cluster) > 1
 ```
 
 #### Study-specific modules vs clusters
 
-```{r modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
+```{r modules_vs_clusters_heatmap, eval = multiple_clusters == T, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(
     cds, 
-    gene_group_df %>% dplyr::filter(!grepl("consensus", unique_module)), 
+    gene_group_df, 
     cell_group_df[, c("cell", "cluster")])
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations[rownames(agg_mat), ]$module,
-                     annotation_row = row_annotations[rownames(agg_mat), c("source", "study")],
-                     annotation_col = col_annotations,
-                     annotation_colors = colours, border_color = NA,
-                     fontsize = 8)
-p
-```
-
-#### Consensus modules vs clusters
-
-```{r consensus_modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of all module scores, collapsed to consensus modules, for all Monocle3 clusters"}
-agg_mat <- 
-  monocle3::aggregate_gene_expression(
-    cds, 
-    gene_group_df %>% dplyr::filter(grepl("consensus", unique_module)), 
-    cell_group_df[, c("cell", "cluster")])
-p <-
-  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations[rownames(agg_mat), ]$module,
                      annotation_col = col_annotations,
                      annotation_colors = colours, border_color = NA,
                      fontsize = 8)
@@ -1013,47 +981,14 @@ p
 
 #### Consensus modules vs partitions
 
-```{r consensus_modules_vs_partitions_heatmap, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of all module scores, collapsed to consensus modules, for all Monocle3 partitions"}
+```{r modules_vs_partitions_heatmap, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of all module scores for all Monocle3 partitions"}
 agg_mat <- 
   monocle3::aggregate_gene_expression(
     cds, 
-    gene_group_df %>% dplyr::filter(grepl("consensus", unique_module)), 
+    gene_group_df, 
     cell_group_df[, c("cell", "partition")])
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations[rownames(agg_mat), ]$module,
-                     annotation_colors = colours, border_color = NA,
-                     fontsize = 8)
-p
-```
-
-#### Balzer modules vs clusters
-
-```{r balzer_modules_vs_clusters_heatmap, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of Balzer module scores for all Monocle3 clusters"}
-agg_mat <- 
-  monocle3::aggregate_gene_expression(
-    cds, 
-    gene_group_df %>% dplyr::filter(grepl("balzer", unique_module)), 
-    cell_group_df[, c("cell", "cluster")])
-p <-
-  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations[rownames(agg_mat), ]$module,
-                     annotation_colors = colours, border_color = NA,
-                     fontsize = 8)
-p
-```
-
-#### Balzer modules vs partitions
-
-```{r balzer_modules_vs_partitions_heatmap, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 15), fig.cap = "Heatmap of Balzer module scores for all Monocle3 partitions"}
-agg_mat <- 
-  monocle3::aggregate_gene_expression(
-    cds, 
-    gene_group_df %>% dplyr::filter(grepl("balzer", unique_module)), 
-    cell_group_df[, c("cell", "partition")])
-p <-
-  pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     labels_row = row_annotations[rownames(agg_mat), ]$module,
                      annotation_colors = colours, border_color = NA,
                      fontsize = 8)
 p
@@ -1061,87 +996,74 @@ p
 
 ```{r knit_module_plots, echo = FALSE, warning = F, message = F, results = 'asis'}
 # get available markers
-consensus_avail_markers <- 
-  list(consensus = get_available_markers(cds, markers)$consensus)
 
 to_knit <- c()
 agg_mat <- list()
 genes <- list()
 cell_group_df <- list()
 
-for(study in names(consensus_avail_markers)) {
 
-  to_knit <- c(to_knit, '\n', get_subheading(study))
-
-  for(source in names(consensus_avail_markers[[study]])) {
-
-    to_knit <- c(to_knit, get_subsubheading(study, source, consensus_avail_markers))
-    author <- get_author(study)
-    chunk_name <- paste(author, substr(source, 1, 3)) %>% janitor::make_clean_names()
+for(ct in names(avail_markers)) {
   
-    for(ct in names(consensus_avail_markers[[study]][[source]])) {
-      
-      to_knit <- c(to_knit, paste0("\n##### Population: **", ct, "**\n"))
-      chunk_name_ct <- paste(chunk_name, ct) %>% janitor::make_clean_names()
-      ct_markers <- consensus_avail_markers[[study]][[source]][[ct]]
-      n_ct_markers <- length(ct_markers)
-      
-      for(lvl in lvls) {
-
-        chunk_name_lvl <- paste(chunk_name_ct, lvl) %>% janitor::make_clean_names()
+  to_knit <- c(to_knit, paste0("\n##### Population: **", ct, "**\n"))
+  chunk_name_ct <- ct %>% janitor::make_clean_names()
+  ct_markers <- avail_markers[[ct]]
+  n_ct_markers <- length(ct_markers)
   
-        if (dplyr::n_distinct(SummarizedExperiment::colData(cds)[, lvl]) > 1 & 
-            n_ct_markers > 1) {
-          
-          genes[[chunk_name_lvl]] <- consensus_avail_markers[[study]][[source]][[ct]]
-          cell_group_df[[chunk_name_lvl]] <-
-            tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)),
-                           cell_group = SummarizedExperiment::colData(cds)[, lvl],
-                           partition = monocle3::partitions(cds))
-          agg_mat[[chunk_name_lvl]] <-
-            monocle3::aggregate_gene_expression(
-              cds[genes[[chunk_name_lvl]], ],
-              cell_group_df = cell_group_df[[chunk_name_lvl]][, c("cell", "cell_group")])
-          knit_lvl_module_heatmap <- c(
-            '',
-            paste0('```{r ', chunk_name_lvl, '_gene_heatmap, class.source = "fold-hide",  warning = F, message = F, fig.dim = c(10, max(length(genes[[chunk_name_lvl]]) / 6, 2))}'),
-            paste0('p <- pheatmap::pheatmap(agg_mat[["', chunk_name_lvl, '"]], scale = "row", clustering_method = "ward.D2", fontsize = 6', ifelse(n_ct_markers == 1, ", cluster_rows = F", ""), ')'),
-            'p',
-            '```',
-            ''
-            )
-          } else {
-            knit_lvl_module_heatmap <- paste0(
-              "Only one ", ifelse(n_ct_markers == 1, "gene", lvl), " so cannot produce a heatmap!\n")
-          }
-        
-        dev_off_if()
-        knitted_lvl_module_heatmap <- knitr::knit_child(text = knit_lvl_module_heatmap, envir = environment(), quiet = TRUE)
-        dev_off_if()
-        to_knit <- c(to_knit, knitted_lvl_module_heatmap)
-      
-      }
+  for(lvl in lvls) {
 
-      if(n_ct_markers < 50) {
-        knit_module_dimplots <- c(
-          '',
-          paste0('```{r ', chunk_name_ct, ', echo = F, warning = F, message = F, fig.dim = get_fig_dims((n_ct_markers + 2), n_cols = 4, height_to_width_ratio = 1.2)}'),
-          'p <- plot_markers_on_umap(cds, ml = ct_markers, final_umap)',
-          'p',
-          '```',
-          ''
-          )
+    chunk_name_lvl <- paste(chunk_name_ct, lvl) %>% janitor::make_clean_names()
+
+    if (dplyr::n_distinct(SummarizedExperiment::colData(cds)[, lvl]) > 1 & 
+        n_ct_markers > 1) {
+      
+      genes[[chunk_name_lvl]] <- avail_markers[[ct]]
+      cell_group_df[[chunk_name_lvl]] <-
+        tibble::tibble(cell = row.names(SummarizedExperiment::colData(cds)),
+                       cell_group = SummarizedExperiment::colData(cds)[, lvl],
+                       partition = monocle3::partitions(cds))
+      agg_mat[[chunk_name_lvl]] <-
+        monocle3::aggregate_gene_expression(
+          cds[genes[[chunk_name_lvl]], ],
+          cell_group_df = cell_group_df[[chunk_name_lvl]][, c("cell", "cell_group")])
+      knit_lvl_module_heatmap <- c(
+        '',
+        paste0('```{r ', chunk_name_lvl, '_gene_heatmap, class.source = "fold-hide",  warning = F, message = F, fig.dim = c(10, max(length(genes[[chunk_name_lvl]]) / 6, 2))}'),
+        paste0('p <- pheatmap::pheatmap(agg_mat[["', chunk_name_lvl, '"]], scale = "row", clustering_method = "ward.D2", fontsize = 6', ifelse(n_ct_markers == 1, ", cluster_rows = F", ""), ')'),
+        'p',
+        '```',
+        ''
+        )
       } else {
-        knit_module_dimplots <- paste(n_ct_markers, "markers in this set - too many to print!\n")
+        knit_lvl_module_heatmap <- paste0(
+          "Only one ", ifelse(n_ct_markers == 1, "gene", lvl), " so cannot produce a heatmap!\n")
       }
-
-      dev_off_if()
-      knitted_module_dimplots <- knitr::knit_child(text = knit_module_dimplots, envir = environment(), quiet = TRUE)
-      dev_off_if()
-      to_knit <- c(to_knit, knitted_module_dimplots)
-
-    }
+    
+    dev_off_if()
+    knitted_lvl_module_heatmap <- knitr::knit_child(text = knit_lvl_module_heatmap, envir = environment(), quiet = TRUE)
+    dev_off_if()
+    to_knit <- c(to_knit, knitted_lvl_module_heatmap)
+  
   }
+
+  if(n_ct_markers < 50) {
+    knit_module_dimplots <- c(
+      '',
+      paste0('```{r ', chunk_name_ct, ', echo = F, warning = F, message = F, fig.dim = get_fig_dims((n_ct_markers + 2), n_cols = 4, height_to_width_ratio = 1.2)}'),
+      'p <- plot_markers_on_umap(cds, ml = ct_markers, final_umap)',
+      'p',
+      '```',
+      ''
+      )
+  } else {
+    knit_module_dimplots <- paste(n_ct_markers, "markers in this set - too many to print!\n")
+  }
+
+  dev_off_if()
+  knitted_module_dimplots <- knitr::knit_child(text = knit_module_dimplots, envir = environment(), quiet = TRUE)
+  dev_off_if()
+  to_knit <- c(to_knit, knitted_module_dimplots)
+
 }
 dev_off_if()
 cat(unlist(to_knit), sep = '\n')
@@ -1276,7 +1198,7 @@ infercnv_obj <- xfun::cache_rds({
 infercnv_obj <- xfun::cache_rds({
   infercnv::run(
     infercnv_obj,
-    cutoff = 1,
+    cutoff = 0.1,
     out_dir = out$infercnv,
     cluster_by_groups = T,
     denoise = T,

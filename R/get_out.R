@@ -1,4 +1,5 @@
 get_out <- function(out_dir,
+                    out_subdir = NULL,
                     experiment,
                     genome,
                     sublibrary,
@@ -29,11 +30,17 @@ get_out <- function(out_dir,
       # if out_dir is given, use out_dir
       out_dir
   } %>% {
+    if (!is.null(out_subdir))
+      paste0(., "/", out_subdir, "/")
+    else
+      .
+  } %>% {
     # pre-set file names (TODO: define these once all outputs are finalised)
     purrr::map(list(base = "",
                     cache = "/cache/",
                     infercnv = "/infercnv/",
-                    scevan = "/scevan/"),
+                    scevan = "/scevan/",
+                    dea = "/dea/"),
                function(x)
       paste0(., x, "/")  %>% clean_path())
   }

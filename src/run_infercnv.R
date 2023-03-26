@@ -6,81 +6,133 @@ devtools::load_all()
 
 out_dir <- "out/230210_A01366_0351_AHNHCFDSX5_x_221202_A01366_0326_AHHTTWDMXY/hg38/comb_x_SHE5052A9_S101/all-well/DGE_filtered/unintegrated/"
 out <- get_out(out_dir)
-dir.create(out$infercnv, showWarnings = F)
 
-# load cds
-cds <- readRDS(list.files(out$cache, pattern = "cds\\_singler\\_annotated", full.names = T))
-
-# define lineages
-# based on consensus_modules_vs_partitions_heatmap-1.png
-final_annotations <- list(
-  "1" = "epithelial",
-  "2" = "epithelial",
-  "3" = "tumour",
-  "4" = "endothelial",
-  "5" = "tumour",
-  "6" = "tumour",
-  "7" = "tumour",
-  "8" = "myeloid",
-  "9" = "tumour",
-  "10" = "tumour",
-  "11" = "lymphoid",
-  "12" = "tumour",
-  "13" = "tumour"
-)
-
-# get lineages
-final_annotations_df <-
-  tibble::tibble(partition = names(final_annotations),
-                 annotation = unlist(final_annotations)) %>%
-  dplyr::mutate(
-    lineage = dplyr::case_when(
-      annotation %in% c("myeloid", "lymphoid") ~ "immune",
-      annotation %in% c("epithelial", "endothelial") ~ "kidney",
-      annotation == "tumour" ~ "tumour"
-    )
-  )
+# define included lineages
 excl_lin <- "immune"
-ref_lin <- "kidney"
-query_lin <- "tumour"
+ref_lin <- "normal"
+query_lin <- "malignant"
 
-# encode in the colData
-final_annotations_df <-
-  dplyr::left_join(
-    tibble::as_tibble(SummarizedExperiment::colData(cds)),
-    final_annotations_df,
-    by = "partition"
-  )
-SummarizedExperiment::colData(cds) <-
-  cbind(
-    SummarizedExperiment::colData(cds),
-    final_annotations_df
-  )
+# do_each_tumour?
+do_each_tumour = F
 
-# exclude `excl_lin` cells
-cds <- cds[, SummarizedExperiment::colData(cds)$lineage != excl_lin]
+# run infercnv on matched normal and tumour cells from each patient
 
-# write annotations_file for infercnv
-infercnv_annotations_file <- paste0(out$infercnv, "infercnv_annotations.tsv")
-SummarizedExperiment::colData(cds)[, "annotation", drop = F] %>%
-  write.table(infercnv_annotations_file, col.names = F, quote = F, sep = "\t")
+# get coldata
+col_data <-
+  SummarizedExperiment::colData(readRDS(paste0(out$cache, "cds_annotated.rds"))) %>%
+  tibble::as_tibble(rownames = "cell")
+patients <-
+  col_data %>%
+  dplyr::filter(lesion_type != "normal_renal") %>%
+  dplyr::distinct(nih_pid, sample) %>%
+  {split(.$sample, .$nih_pid)}
 
-# create infercnv object
-infercnv_obj <-
-  infercnv::CreateInfercnvObject(
-    raw_counts_matrix = cds@assays@data$counts,
-    annotations_file = infercnv_annotations_file,
-    gene_order_file = "data/gencode/gencode.v43.basic.annotation_clean.bed",
-    ref_group_names = c("epithelial", "endothelial")
-  )
+purrr::map(names(patients), function(patient) {
 
-# perform infercnv operations to reveal cnv signal
-infercnv_obj <-
-  infercnv::run(
-    infercnv_obj,
-    cutoff = 1,
-    out_dir = out$infercnv,
-    cluster_by_groups = T,
-    denoise = T,
-    HMM = T
-  )
+  # all tumours per patient
+  print(patient)
+
+  # get outdir
+  patient_out <- get_out(out_dir = paste0(out_dir, "/", patient)
+
+  # create infercnv outdir
+  dir.create(patient_out$infercnv, showWarnings = F, recursive = T)
+
+  # write annotations_file for infercnv
+  infercnv_annotations_file <- paste0(patient_out$infercnv, "infercnv_annotations.tsv")
+  infercnv_annotations <-
+    col_data %>%
+    dplyr::filter(partition_lineage != excl_lin,
+                  nih_pid == patient) %>%
+    dplyr::transmute(
+      cell,
+      infercnv_lineage = dplyr::case_when(partition_lineage == "malignant" ~ paste0("malignant_", sample),
+                                          TRUE ~ cluster_annot))
+  ref_group_names <-
+    infercnv_annotations %>%
+    dplyr::filter(!grepl("malignant", infercnv_lineage)) %>%
+    dplyr::pull(infercnv_lineage) %>%
+    unique()
+  write.table(infercnv_annotations, infercnv_annotations_file,
+              row.names = F, col.names = F, quote = F, sep = "\t")
+
+  # create infercnv object
+  infercnv_obj <-
+    infercnv::CreateInfercnvObject(
+      raw_counts_matrix = as.matrix(readRDS(paste0(out$cache, "cds_annotated.rds"))@assays@data$counts),
+      annotations_file = infercnv_annotations_file,
+      gene_order_file = "data/gencode/gencode.v43.basic.annotation_clean.bed",
+      ref_group_names = ref_group_names
+    )
+
+  options(scipen = 100)
+
+  # perform infercnv operations to reveal cnv signal
+  infercnv_obj <-
+    infercnv::run(
+      infercnv_obj,
+      cutoff = 0.1,
+      out_dir = patient_out$infercnv,
+      cluster_by_groups = T,
+      denoise = T,
+      HMM = T, resume_mode = F
+    )
+
+  if (do_each_tumour == T) {
+    purrr::map(patients[[patient]], function(tumour) {
+
+      # each tumour per patient
+      print(patient) ; print(tumour)
+
+      # get outdir
+      tumour_out <- get_out(out_dir = paste0(out_dir, "/", patient, "/", tumour))
+
+      # create infercnv outdir
+      dir.create(tumour_out$infercnv, showWarnings = F, recursive = T)
+
+      # write annotations_file for infercnv
+      infercnv_annotations_file <- paste0(tumour_out$infercnv, "infercnv_annotations.tsv")
+      infercnv_annotations <-
+        col_data %>%
+        dplyr::filter(partition_lineage != excl_lin,
+                      nih_pid == patient,
+                      sample == tumour | partition_lineage == "normal") %>%
+        dplyr::transmute(
+          cell,
+          infercnv_lineage = dplyr::case_when(partition_lineage == "malignant" ~ paste0("malignant_", sample),
+                                              TRUE ~ cluster_annot))
+      ref_group_names <-
+        infercnv_annotations %>%
+        dplyr::filter(!grepl("malignant", infercnv_lineage)) %>%
+        dplyr::pull(infercnv_lineage) %>%
+        unique()
+      write.table(infercnv_annotations, infercnv_annotations_file,
+                  row.names = F, col.names = F, quote = F, sep = "\t")
+
+      # create infercnv object
+      infercnv_obj <-
+        infercnv::CreateInfercnvObject(
+          raw_counts_matrix = as.matrix(readRDS(paste0(out$cache, "cds_annotated.rds"))@assays@data$counts),
+          annotations_file = infercnv_annotations_file,
+          gene_order_file = "data/gencode/gencode.v43.basic.annotation_clean.bed",
+          ref_group_names = ref_group_names
+        )
+
+      options(scipen = 100)
+
+      # perform infercnv operations to reveal cnv signal
+      infercnv_obj <-
+        infercnv::run(
+          infercnv_obj,
+          cutoff = 0.1,
+          out_dir = tumour_out$infercnv,
+          cluster_by_groups = T,
+          denoise = T,
+          HMM = T, resume_mode = F
+        )
+
+    })
+  }
+
+})
+

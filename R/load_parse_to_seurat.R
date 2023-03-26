@@ -6,7 +6,8 @@ load_parse_to_seurat <-
            parse_analysis_subdir,
            min_nFeature_RNA,
            min_nuclei_per_gene,
-           sample_subset,
+           sample_subset = NULL,
+           cell_subset = NULL,
            remove_na_samples = F,
            do_add_sample_metadata = T,
            do_add_summary_stats = T,
@@ -17,6 +18,7 @@ load_parse_to_seurat <-
 
     seu_ls <- purrr::map2(c(experiment), c(sublibrary), function(exp, sublib) {
 
+      cat(exp, sublib, "\n")
       # testing: # exp=experiment[2];sublib=sublibrary[2]
 
       # read in DGE matrix
@@ -92,24 +94,40 @@ load_parse_to_seurat <-
 
       }
 
+      # subset to cell subset
+      if (!is.null(cell_subset)) {
+        seu_i <- seu_i[, intersect(cell_subset, colnames(seu_i))]
+      }
+
       # subset to sample subset
-      if(!is.null(sample_subset)) {
+      if (!is.null(sample_subset)) {
 
-        seu_i <- subset(x = seu_i, subset = sample %in% sample_subset)
+        if (length(intersect(sample_subset, seu_i$sample)) == 0) {
 
-        seu_i@misc$sample_metadata <-
-          seu_i@misc$sample_metadata %>%
-          dplyr::filter(sample %in% sample_subset)
+          seu_i <- NULL
 
-        seu_i@misc$summary_stats <-
-          seu_i@misc$summary_stats %>%
-          dplyr::filter(sample %in% sample_subset)
+        } else {
+
+          seu_i <- subset(x = seu_i, subset = sample %in% sample_subset)
+
+          seu_i@misc$sample_metadata <-
+            seu_i@misc$sample_metadata %>%
+            dplyr::filter(sample %in% sample_subset)
+
+          seu_i@misc$summary_stats <-
+            seu_i@misc$summary_stats %>%
+            dplyr::filter(sample %in% sample_subset)
+
+        }
 
       }
 
       seu_i
 
     })
+
+    # drop empty elements
+    seu_ls <- Filter(Negate(is.null), seu_ls)
 
     # merge if multiple runs, combine misc slot
     if (length(seu_ls) > 1) {

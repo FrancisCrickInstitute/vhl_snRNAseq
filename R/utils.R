@@ -265,7 +265,7 @@ plot_markers_on_umap <- function(object, ml, final_umap) {
                             dplyr::mutate(count = dat) %>%
                             dplyr::as_tibble(),
                           ggplot2::aes(x, y, colour = count), size = 0.4) +
-      ggplot2::scale_colour_gradientn(colours = c("grey", "#ECE147", "#2374B0"),
+      ggplot2::scale_colour_gradientn(colours = c("grey", "#2374B0", "#ECE147"),
                                       values = scales::rescale(c(0, minmax[1], minmax[2]))) +
       umap_void_theme
 
