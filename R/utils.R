@@ -309,3 +309,8 @@ get_singler_annot_label <- function(cds, annot, lvl) {
     {dplyr::left_join(dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>% dplyr::transmute(lvl = get(lvl)), multiple = "all", ., by = "lvl")} %>%
     dplyr::pull(label)
 }
+
+# get patient ids from sample ids
+get_patients_from_samples <- function(samples) {
+  gsub("\\_.*", "", gsub("K891", "N23", samples))
+}
