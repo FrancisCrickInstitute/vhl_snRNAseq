@@ -13,8 +13,8 @@ ref_lin <- "normal"
 query_lin <- "malignant"
 
 # do_each_tumour?
-do_each_tumour = T
-do_all_tumours = F
+do_each_tumour = F
+do_all_tumours = T
 
 # run infercnv on matched normal and tumour cells from each patient
 
@@ -24,8 +24,7 @@ col_data <-
   tibble::as_tibble(rownames = "cell")
 patients <-
   col_data %>%
-  dplyr::filter(lesion_type != "normal_renal",
-                sample %ni% c("N045_V003", "N045_V010")) %>%
+  dplyr::filter(lesion_type != "normal_renal") %>% #,sample %ni% c("N045_V003", "N045_V010", "N045_V008C")) %>%
   dplyr::distinct(nih_pid, sample) %>%
   {split(.$sample, .$nih_pid)}
 
@@ -50,7 +49,7 @@ purrr::map(names(patients), function(patient) {
                  nih_pid == patient) %>%
    dplyr::transmute(
      cell,
-     infercnv_lineage = dplyr::case_when(partition_lineage == "malignant" ~ paste0("malignant_", tumour),
+     infercnv_lineage = dplyr::case_when(partition_lineage == "malignant" ~ paste0("malignant_", sample),
                                          TRUE ~ cluster_annot))
   ref_group_names <-
    infercnv_annotations %>%

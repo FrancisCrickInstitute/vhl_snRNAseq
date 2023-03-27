@@ -7,8 +7,8 @@ transcript_types <- readr::read_tsv("data/transcript_types.tsv")
 markers <- readRDS("data/markers.rds")
 
 # colours
-ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors()),
-                      ggplot2::scale_colour_manual(values = dittoSeq::dittoColors()))
+ditto_colours <- list(ggplot2::scale_fill_manual(values = dittoSeq::dittoColors(), na.value = "white"),
+                      ggplot2::scale_colour_manual(values = dittoSeq::dittoColors(), na.value = "white"))
 
 # umap void theme
 umap_void_theme <-
