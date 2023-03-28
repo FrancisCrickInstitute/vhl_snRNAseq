@@ -12,6 +12,14 @@ out <- get_out(out_dir)
 # load cds
 cds <- readRDS(paste0(out$cache, "cds_annotated.rds"))
 
+# patient subset
+patient <- "N045"
+
+# subset cds
+cds <- cds[,
+           SummarizedExperiment::colData(cds)$nih_pid == patient &
+             SummarizedExperiment::colData(cds)$partition_lineage != "immune"]
+
 # differential expression between tumour vs non-tumour
 marker_test_res <-
   top_markers_develop(cds,

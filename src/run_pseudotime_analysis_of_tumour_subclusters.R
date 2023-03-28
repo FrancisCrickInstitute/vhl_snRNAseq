@@ -16,11 +16,12 @@ dir.create(out$dea, showWarnings = F)
 # epithelial and tumour
 
 # load cds
-cds <- readRDS(list.files(out$cache, pattern = "cds\\_singler\\_annotated", full.names = T))
+cds <- readRDS(paste0(out_dir, "cache/cds_annotated.rds"))
 
 # isolate only epithelial and tumour lineages (remove immune / endothelial)
 renal_annotations <-
-  readr::read_tsv(paste0(out_dir, "cell_annotations.tsv")) %>%
+  SummarizedExperiment::colData(cds) %>%
+  tibble::as_tibble(rowname)
   dplyr::filter(partition_annot %in% c("epithelial", "malignant"),
                 grepl(sample_pattern, sample),
                 cell %in% colnames(cds))

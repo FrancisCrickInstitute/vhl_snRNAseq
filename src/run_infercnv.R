@@ -24,7 +24,8 @@ col_data <-
   tibble::as_tibble(rownames = "cell")
 patients <-
   col_data %>%
-  dplyr::filter(lesion_type != "normal_renal") %>% #,sample %ni% c("N045_V003", "N045_V010", "N045_V008C")) %>%
+  dplyr::filter(lesion_type != "normal_renal") %>%
+  dplyr::filter(nih_pid %ni% c("N045", "N059")) %>%
   dplyr::distinct(nih_pid, sample) %>%
   {split(.$sample, .$nih_pid)}
 

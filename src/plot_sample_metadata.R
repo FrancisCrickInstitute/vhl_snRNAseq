@@ -104,7 +104,9 @@ scna_cyto_drivers <-
                                                               grepl("Loss", scna_cyto_driver) ~ "loss")) %>%
   dplyr::inner_join(sample_subset) %>%
   dplyr::filter(value == 1) %>%
-  dplyr::select(-value)
+  dplyr::select(-value) %>%
+  dplyr::group_by(scna_cyto_driver) %>%
+  dplyr::mutate(scna_cyto_driver_n = dplyr::n())
 
 # merge
 genotypes <-
@@ -131,11 +133,12 @@ p_dat <-
     # mutation-level variables
     dplyr::all_of(muts_to_plot),
     # scna cyto drivers-level variables
-    scna_cyto_driver, scna_cyto_driver_direction
+    dplyr::starts_with("scna_cyto_driver")
   ) %>%
   dplyr::mutate(sample = factor(sample, ordered = T))
 
-plot_variable <- function(p_dat, variable, show_col_names = F) {
+plot_variable <- function(p_dat, variable, lvl, variable_colours,
+                          show_col_names = F, return_legend = F) {
   p <-
     p_dat %>%
     dplyr::select(sample, dplyr::all_of(variable)) %>%
@@ -144,15 +147,17 @@ plot_variable <- function(p_dat, variable, show_col_names = F) {
       ggplot2::aes(x = sample, y = name, fill = value)) +
     ggplot2::geom_tile(colour = "white") +
     ggplot2::theme_void() +
-    ggplot2::labs(fill = variable) +
-    ggplot2::theme(axis.text.y = ggplot2::element_text(hjust = 1),
-                   legend.position = "none")
+    ggplot2::theme(axis.text.y = ggplot2::element_text(hjust = 1))
   if (show_col_names == T) {
     p <- p +
       ggplot2::theme(axis.text.x = ggplot2::element_text(hjust = 0, angle = 90)) +
       ggplot2::scale_x_discrete(position = "top")
   }
-  if (is.numeric(unlist(p_dat[, variable , drop=T]))) {
+  if (all(variable %in% names(variable_colours))) {
+    p <- p +
+      ggplot2::scale_fill_manual(values = variable_colours[[variable]],
+                                 na.value = "white")
+  } else if (is.numeric(unlist(p_dat[, variable , drop=T]))) {
     p <- p + ggplot2::scale_fill_gradient(
       low = "#fae3f5",
       high = "#611d52",
@@ -160,45 +165,84 @@ plot_variable <- function(p_dat, variable, show_col_names = F) {
   } else {
     p <- p + ditto_colours
   }
-  p
+  if (return_legend == T) {
+    lemon::g_legend(
+      p +
+        ggplot2::labs(fill = ifelse(lvl == "mut", "mut ccf", variable)) +
+        ggplot2::theme(legend.position = "bottom")
+    )
+  } else {
+    p + ggplot2::theme(legend.position = "none")
+  }
 }
-
 
 # variable levels
 variable_lvls <- list(
   patient = list("sex", "vhl_germline_mutation"),
-  sample = list("age_at_surgery", "fuhrman_grade", "tumour_size", "lesion_type"),
+  sample = list("fuhrman_grade", "lesion_type", "age_at_surgery", "tumour_size"),
   wg = list("purity", "ploidy", "wgii"),
   mut = list(muts = muts_to_plot)
   )
 
-# patient-level variables
+# get colours
+avail_colours <- dittoSeq::dittoColors()
+variable_colours <- list()
+p_leg <- list()
+for(variable in c("nih_pid", unlist(variable_lvls))) {
+  if (!is.numeric(unlist(p_dat[,variable]))) {
+    cat(lvl, variable, "categorical\n")
+    n_colours <- length(unique(p_dat[,variable,drop=T]))
+    variable_colours[[variable]] <-
+      avail_colours[1:n_colours]
+    avail_colours <- avail_colours[-c(1:n_colours)]
+  }
+}
+variable_colours[["scna_cyto_driver"]] <-
+  c("loss" = "#1c429c", "gain" = "#a31b0f")
+variable_colours[["sex"]] <-
+  c("f" = "#ffb3fc", "m" = "#7eaaed")
+
+# patient level variables
 p_patients <-
-  plot_variable(p_dat, "nih_pid", show_col_names = T)
+  plot_variable(p_dat, "nih_pid", variable_colours, "patient", show_col_names = T)
+p_leg[["patients"]] <-
+  plot_variable(p_dat, "nih_pid", variable_colours, "patient", return_legend = T)
+
+# patient / sample / wg / mut level variables
 p_variables <-
   names(variable_lvls) %>%
   purrr::map(function(lvl) {
     variable_lvls[[lvl]] %>%
       purrr::map(function(variable) {
-        plot_variable(p_dat, variable)
+        cat(lvl, variable, "\n")
+        p_leg[[ifelse(lvl == "mut", lvl, variable)]] <<-
+          plot_variable(p_dat, variable, lvl, variable_colours, return_legend = T)
+        plot_variable(p_dat, variable, lvl, variable_colours)
       }) %>% patchwork::wrap_plots(ncol = 1)
   }) %>% patchwork::wrap_plots(ncol = 1, heights = c(2,4,3,8))
+
+# cn level variables
 p_cn <-
   p_dat %>%
-  dplyr::select(sample, dplyr::all_of(c("scna_cyto_driver", "scna_cyto_driver_direction"))) %>%
+  dplyr::select(sample, dplyr::starts_with("scna_cyto_driver")) %>%
   dplyr::mutate(scna_cyto_driver = tidyr::replace_na(scna_cyto_driver, "")) %>%
   ggplot2::ggplot(
-    ggplot2::aes(x = sample, y = scna_cyto_driver, fill = scna_cyto_driver_direction)) +
+    ggplot2::aes(x = sample, y = reorder(scna_cyto_driver, scna_cyto_driver_n), fill = scna_cyto_driver_direction)) +
   ggplot2::geom_tile(colour = "white") +
   ggplot2::theme_void() +
-  ggplot2::labs(fill = variable) +
-  ggplot2::theme(legend.position = "none",
-                 axis.text.y = ggplot2::element_text(hjust = 1)) +
-  ggplot2::scale_fill_manual(values = c("loss" = "#1c429c", "gain" = "#a31b0f"),
+  ggplot2::labs(fill = "direction") +
+  ggplot2::theme(axis.text.y = ggplot2::element_text(hjust = 1),
+                 legend.position = "bottom") +
+  ggplot2::scale_fill_manual(values = variable_colours[["scna_cyto_driver"]],
                              na.value = "white")
+p_leg[["cn"]] <- lemon::g_legend(p_cn)
+p_cn <- p_cn + ggplot2::theme(legend.position = "none")
 
-pdf(paste0(out$base, "sample_heatmap.pdf"), width = 5, height = 7)
+pdf(paste0(out$base, "sample_heatmap.pdf"), width = 6.6, height = 8)
 list(p_patients, p_variables, p_cn) %>%
   patchwork::wrap_plots(ncol = 1, heights = c(1, 16, 12))
 dev.off()
 
+pdf(paste0(out$base, "sample_heatmap_legends.pdf"), width = 6, height = 10)
+p_leg %>% patchwork::wrap_plots(ncol = 1)
+dev.off()
