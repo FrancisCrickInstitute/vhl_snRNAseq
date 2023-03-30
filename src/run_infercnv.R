@@ -1,3 +1,6 @@
+curr_nih_pid <- commandArgs(trailingOnly = T)[1]
+curr_analysis_mode <- commandArgs(trailingOnly = T)[2]
+
 base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
                    "/Volumes/TracerX/",
                    "/camp/project/tracerX/")
@@ -25,7 +28,7 @@ col_data <-
 patients <-
   col_data %>%
   dplyr::filter(lesion_type != "normal_renal") %>%
-  dplyr::filter(nih_pid %ni% c("N045", "N059")) %>%
+  dplyr::filter(nih_pid == curr_nih_pid) %>%
   dplyr::distinct(nih_pid, sample) %>%
   {split(.$sample, .$nih_pid)}
 
@@ -38,6 +41,7 @@ purrr::map(names(patients), function(patient) {
 
   # get outdir
   patient_out <- get_out(out_dir = paste0(out_dir, "/", patient))
+  patient_out$infercnv <- paste0(patient_out$infercnv, "/", curr_analysis_mode, "/")
 
   # create infercnv outdir
   dir.create(patient_out$infercnv, showWarnings = F, recursive = T)
@@ -51,7 +55,10 @@ purrr::map(names(patients), function(patient) {
    dplyr::transmute(
      cell,
      infercnv_lineage = dplyr::case_when(partition_lineage == "malignant" ~ paste0("malignant_", sample),
-                                         TRUE ~ cluster_annot))
+                                         TRUE ~ cluster_annot)) %>%
+    dplyr::group_by(infercnv_lineage) %>%
+    # remove lineages containing only 1 cell
+    dplyr::filter(dplyr::n() > 1)
   ref_group_names <-
    infercnv_annotations %>%
    dplyr::filter(!grepl("malignant", infercnv_lineage)) %>%
@@ -79,7 +86,8 @@ purrr::map(names(patients), function(patient) {
      out_dir = patient_out$infercnv,
      cluster_by_groups = T,
      denoise = T,
-     HMM = T, resume_mode = T
+     HMM = T, resume_mode = T,
+     analysis_mode = curr_analysis_mode
    )
 
   }
@@ -106,7 +114,7 @@ purrr::map(names(patients), function(patient) {
         dplyr::transmute(
           cell,
           infercnv_lineage = dplyr::case_when(partition_lineage == "malignant" ~ paste0("malignant_", sample),
-                                              TRUE ~ cluster_annot))
+                                              TRUE ~ partition_annot))
       ref_group_names <-
         infercnv_annotations %>%
         dplyr::filter(!grepl("malignant", infercnv_lineage)) %>%

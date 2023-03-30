@@ -8,6 +8,17 @@ out_dir <- "out/230210_A01366_0351_AHNHCFDSX5_x_221202_A01366_0326_AHHTTWDMXY/hg
 
 out <- get_out(out_dir)
 
+# plot annotations on umap
+cds <- readRDS(paste0(out$cache, "cds_annotated.rds"))
+pdf(paste0(out$base, "annotations_on_umap.pdf"), width = 15, height = 6.5)
+dittoSeq::dittoDimPlot(cds, "partition_lineage") +
+  umap_void_theme + ggplot2::theme(legend.position = "bottom") +
+  dittoSeq::dittoDimPlot(cds, "partition_annot") +
+    umap_void_theme + ggplot2::theme(legend.position = "bottom") +
+  dittoSeq::dittoDimPlot(cds, "cluster_annot") +
+    umap_void_theme + ggplot2::theme(legend.position = "bottom")
+dev.off()
+
 # get celltype annotations
 cts <- readr::read_tsv(paste0(out$base, "cell_annotations.tsv")) %>%
   dplyr::mutate(patient = gsub("\\_.*", "", ifelse(grepl("K891", sample), "N23", sample))) %>%
@@ -69,63 +80,52 @@ counts$cluster_annot <-
            counts$cluster_annot[order(counts$partition_lineage, counts$cluster_annot)]),
          ordered = TRUE)
 
-# plot annotations, by proportion, ordered by prop_n_malignant
-counts %>%
-  ggplot2::ggplot(ggplot2::aes(x = reorder(sample, -as.numeric(prop_n_malignant)), fill = cluster_annot)) +
-  ggplot2::geom_bar(position = "fill") +
-  ditto_colours +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 0.95, vjust = 0.2),
-                 panel.grid = ggplot2::element_blank()) +
-  ggplot2::labs(x = "sample", y = "", fill = "population")
-
-# plot annotations, by count, ordered by n_malignant
-counts %>%
-  ggplot2::ggplot(ggplot2::aes(x = reorder(sample, -as.numeric(n_malignant)), fill = cluster_annot)) +
-  ggplot2::geom_bar() +
-  ditto_colours +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 0.95, vjust = 0.2),
-                 panel.grid = ggplot2::element_blank()) +
-  ggplot2::labs(x = "sample", y = "", fill = "population")
-
 # prepare data with ordering by unique sample
 p_dat <-
   counts %>%
-  dplyr::select(sample, sample_id,
+  dplyr::select(sample, sample_id, patient,
                 dplyr::starts_with("n_"),
                 dplyr::starts_with("prop_"),
                 cluster_annot,
-                partition_lineage, patient) %>%
+                partition_lineage) %>%
   dplyr::arrange(sample, n_malignant_lineage)
-p_labels <- unique(p_dat$sample_id)
 
-# plot lineages and annotations, by proportion, ordered by n_malignant within patients
-p_dat %>%
-  dplyr::filter(partition_lineage != "malignant") %>%
-  ggplot2::ggplot(ggplot2::aes(x = reorder(sample, - n_malignant_lineage), fill = cluster_annot)) +
-  ggplot2::geom_bar(position = "fill") +
-  ggplot2::facet_grid(partition_lineage ~ patient,
-                      scales = "free", space = "free") +
-  ditto_colours +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 0.95, vjust = 0.2),
-                 panel.grid = ggplot2::element_blank()) +
-  ggplot2::labs(x = "sample", y = "", fill = "population") +
-  ggplot2::scale_x_discrete(labels = p_labels)
+# plot all function
+plot_all <- function(counts, y_title, no_legend = F, ...) {
+  counts %>%
+    ggplot2::ggplot(ggplot2::aes(x = reorder(sample, -as.numeric(prop_n_malignant_lineage)), fill = cluster_annot)) +
+    ggplot2::geom_bar(...) +
+    ditto_colours +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 0.95, vjust = 0.2),
+                   panel.grid = ggplot2::element_blank(),
+                   legend.position = ifelse(no_legend, "none", "right")) +
+    ggplot2::labs(x = "sample", y = y_title, fill = "population")
+}
 
-# plot lineages and annotations, by count, ordered by prop_n_malignant within patients
-p_dat %>%
-  ggplot2::ggplot(ggplot2::aes(x = reorder(sample, -p), fill = cluster_annot)) +
-  ggplot2::geom_bar() +
-  ggplot2::facet_grid(partition_lineage ~ patient,
-                      scales = "free", space = "free") +
-  ditto_colours +
-  ggplot2::theme_minimal() +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 0.95, vjust = 0.2),
-                 panel.grid = ggplot2::element_blank()) +
-  ggplot2::labs(x = "sample", y = "", fill = "population") +
-  ggplot2::scale_x_discrete(labels = p_labels)
+# plot lineages function
+plot_by_lineage <- function(p_dat, y_title, no_legend = F, ...) {
+  p_dat %>%
+    ggplot2::ggplot(ggplot2::aes(x = tidytext::reorder_within(sample_id, -n_malignant_lineage, patient), fill = cluster_annot)) +
+    ggplot2::geom_bar(...) +
+    ggplot2::facet_grid(partition_lineage ~ patient,
+                        scales = "free", space = "free_x", switch = "x") +
+    ditto_colours +
+    ggplot2::theme_bw() +
+    ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, hjust = 0.95, vjust = 0.2),
+                   panel.grid = ggplot2::element_blank(),
+                   legend.position = ifelse(no_legend, "none", "right")) +
+    ggplot2::labs(x = "sample", fill = "population", y = y_title)
+}
+
+# plots
+p <- list()
+p[["all"]] <-
+  (plot_all(counts, "proportion of cells", no_legend = T, position = "fill") +
+     plot_all(counts, "n cells"))
+p[["lineages"]] <-
+  (plot_by_lineage(p_dat, "proportion of cells", no_legend = T, position = "fill") +
+  plot_by_lineage(p_dat, "n cells"))
 
 # save proportions to output
 counts %>%
@@ -136,3 +136,34 @@ counts %>%
   ) %>%
   readr::write_tsv(paste0(out$base, "sample_composition.tsv"))
 
+
+count_annot_lvl <- function(counts, annot_i) {
+  counts %>%
+    dplyr::rename(annot = dplyr::matches(annot_i)) %>%
+    dplyr::group_by(annot) %>%
+    dplyr::summarise(n = dplyr::n(),
+                     clusters = paste(unique(sort(cluster)), collapse = ","),
+                     partitions = paste(unique(sort(partition)), collapse = ","),
+                     annot_level = annot_i) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(prop = paste0(round(n / sum(n) * 100, 1), "%")) %>%
+    dplyr::arrange(desc(n)) %>%
+    dplyr::select(annot_level, annot, n, prop, clusters, partitions)
+}
+
+# save annotation counts at different levels
+c("partition_annot", "partition_lineage", "cluster_annot") %>%
+  purrr::map(function(annot_i) {count_annot_lvl(counts, annot_i)}) %>%
+  dplyr::bind_rows() %>%
+  readr::write_tsv(paste0(out$base, "annot_counts.tsv"))
+
+# save plots
+pdf(paste0(out$base, "sample_composition.pdf"), height = 8, width = 12, onefile = T)
+purrr::walk(p, print)
+dev.off()
+
+# colours <-
+#   dittoSeq::dittoColors()[1:length(unique(SummarizedExperiment::colData(cds)$sample))]
+# samples <- sort(unique(SummarizedExperiment::colData(cds)$sample))
+# names(colours) <- c(samples[2:24], samples[1])
+# dittoSeq::dittoDimPlot(cds, "sample") + ggplot2::scale_colour_manual(values = colours)

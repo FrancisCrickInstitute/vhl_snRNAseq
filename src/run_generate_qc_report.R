@@ -42,8 +42,8 @@ library(devtools) ; load_all() ;
 
 # testing and cacheing params
 testing = F
-do_timestamp = T
-rerun = T
+do_timestamp = F
+rerun = F
 # testing=F;do_timestamp=F;rerun=F
 
 # check for final annotations

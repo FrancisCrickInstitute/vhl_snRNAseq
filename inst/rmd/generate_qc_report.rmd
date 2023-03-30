@@ -136,7 +136,7 @@ p <-
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
   ggplot2::geom_col() +
   ggplot2::facet_grid(statistic ~ ., scales = "free") +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) 
 p
 ```
 
@@ -292,7 +292,8 @@ p <-
   ggplot2::ggplot(ggplot2::aes(x = sample, y = n, fill = fail_criteria)) +
   ggplot2::geom_col() +
   ditto_colours +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
+  ggplot2::scale_fill_discrete(na.value = "grey")
 p
 ```
 
@@ -600,7 +601,10 @@ purrr::walk(avail_groupings, function(grouping) {
         reduction_method = redu, 
         color_cells_by = grouping,
         show_trajectory_graph = F, 
-        label_cell_groups = F)
+        label_cell_groups = F) 
+    if (!is.numeric(SummarizedExperiment::colData(cds)[, grouping])) {
+      p <- p + ditto_colours
+    }
     groupings_vs_reductions[[paste0(grouping, "_legend")]] <<-
       lemon::g_legend(p)
     groupings_vs_reductions[[title]] <<- 
@@ -965,7 +969,7 @@ multiple_partitions <- dplyr::n_distinct(cell_group_df$partition) > 1
 multiple_clusters <- dplyr::n_distinct(cell_group_df$cluster) > 1
 ```
 
-#### Study-specific modules vs clusters
+#### Consensus modules vs clusters
 
 ```{r modules_vs_clusters_heatmap, eval = multiple_clusters == T, echo = F, warning = F, message = F, fig.dim = c(10, 20), fig.cap = "Heatmap of all module scores for all Monocle3 clusters"}
 agg_mat <- 
@@ -976,8 +980,7 @@ agg_mat <-
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
                      annotation_col = col_annotations,
-                     annotation_colors = colours, border_color = NA,
-                     fontsize = 8)
+                     annotation_colors = colours, border_color = NA)
 p
 ```
 
@@ -991,8 +994,14 @@ agg_mat <-
     cell_group_df[, c("cell", "partition")])
 p <-
   pheatmap::pheatmap(agg_mat, scale = "row", clustering_method = "ward.D2",
-                     annotation_colors = colours, border_color = NA,
-                     fontsize = 8)
+                     annotation_colors = colours, border_color = NA)
+p
+```
+
+#### HIF target gene expression
+
+```{r hif_genes_vs_cells, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 10), fig.cap = "Plot of HIF module score for all cells"}
+p <- monocle3::plot_cells(cds, genes = avail_markers$HIF)
 p
 ```
 
