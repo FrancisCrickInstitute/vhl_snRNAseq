@@ -20,7 +20,7 @@ analysis_mode=$analysis_mode
 cd $(pwd) ; . src/config.sh
 
 # run generate_QC_report.R
-Rscript src/run_infercnv.R $nih_pid $anaysis_mode
+Rscript src/run_infercnv.R $nih_pid $analysis_mode
 EOF
 
 # submit the script

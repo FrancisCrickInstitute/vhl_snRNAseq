@@ -120,6 +120,9 @@ muts <-
   dplyr::group_by(lesion_id, mut) %>%
   dplyr::slice_max(mut_ccf) %>%
   tidyr::pivot_wider(names_from = mut, values_from = mut_ccf)
+muts %>%
+  dplyr::select(-tumour_sample_barcode, -lesion_id) %>%
+  readr::write_tsv(paste0(out$base, "mutect2_mutations.tsv"))
 
 # CNV drivers
 scna_drivers <-

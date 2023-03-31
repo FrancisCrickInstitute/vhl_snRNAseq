@@ -10,6 +10,10 @@ out <- get_out(out_dir)
 # load cds
 cds <- readRDS(paste0(out$cache, "cds_annotated.rds"))
 
+# get mutation data
+muts <-
+  readr::read_tsv(paste0(out$base, "mutect2_mutations.tsv"))
+
 # get infercnv metadata
 curr_analysis_mode <- "samples"
 infercnv_metadata <- list()
@@ -31,19 +35,36 @@ SummarizedExperiment::colData(cds)$nih_pid %>%
     }
   })
 
-# add to cds object
+# add to cnv and muts to cds object
 SummarizedExperiment::colData(cds) <-
   cbind(
     SummarizedExperiment::colData(cds),
-    dplyr::left_join(
-      tibble::tibble(cell = colnames(cds)),
-      infercnv_metadata %>% dplyr::bind_rows(),
-      by = "cell"
-    ) %>% dplyr::select(-cell)
+    tibble::tibble(cell = colnames(cds),
+                   sample = SummarizedExperiment::colData(cds)$sample) %>%
+      dplyr::left_join(
+        infercnv_metadata %>% dplyr::bind_rows(),
+        by = "cell") %>%
+      dplyr::left_join(
+        muts %>%
+          dplyr::select(-nih_pid) %>%
+          dplyr::rename_with(.cols = -c("sample"), ~ paste0(.x, "_mut")),
+        by = "sample") %>%
+      dplyr::select(-cell, -sample)
   )
 
 # save cds
 saveRDS(cds, paste0(out$cache, "cds_infercnv.rds"))
+# cds <- readRDS(paste0(out$cache, "cds_infercnv.rds"))
+
+# plot mutations
+muts_to_plot <-
+  colnames(SummarizedExperiment::colData(cds))[
+    grepl("_mut", colnames(SummarizedExperiment::colData(cds)))
+  ]
+monocle3::plot_cells(cds, color_cells_by = "VHL_mut")
+monocle3::plot_cells(cds, color_cells_by = "PBRM1_mut")
+
+
 
 # plot driver losses on umap
 dittoSeq::dittoDimPlot(cds, "has_loss_chr3", size = 0.1)
