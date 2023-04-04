@@ -9,9 +9,10 @@ generate_qc_report(
   experiment,
   genome = "hg38",
   sublibrary = "comb",
-  parse_analysis_subdir = "all-well/DGE_unfiltered/",
+  parse_analysis_subdir = "all-well/DGE_filtered/",
   do_filtering = T,
-  remove_doublets = F,
+  remove_doublets = T,
+  do_cell_cycle_scoring = T,
   min_nuclei_per_gene = 5,
   min_nCount_RNA = NULL,
   max_nCount_RNA = NULL,
@@ -23,12 +24,16 @@ generate_qc_report(
   clustering_resolutions = seq(0.1, 0.8, by = 0.1),
   final_clustering_resolution = NULL,
   out_dir = NULL,
+  out_subdir = NULL,
   sample_subset = NULL,
+  cell_subset = NULL,
   do_timestamp = F,
   do_integration = F,
   integration_col = "sample",
-  final_celltype_annotations = NULL,
-  testing = F
+  final_annotations = NULL,
+  final_annotations_lvl = "partition",
+  testing = F,
+  rerun = F
 )
 }
 \arguments{
@@ -45,6 +50,8 @@ generate_qc_report(
 \item{do_filtering}{If \code{TRUE}, apply quality control filters to genes and nuclei.}
 
 \item{remove_doublets}{If \code{TRUE}, removes suspected doublet nuclei, as detected by the scDblFinder package.}
+
+\item{do_cell_cycle_scoring}{If \code{TRUE}, scores cells by cell cycle stage.}
 
 \item{min_nuclei_per_gene}{\emph{Gene filter}. The minimum number of nuclei in which a gene must be present. Genes that are present in very few nuclei are uninformative and unlikely to help in differentiating groups of nuclei. In general, most genes removed by this filtering will be those not detected in any nucleus.}
 
@@ -66,7 +73,11 @@ generate_qc_report(
 
 \item{out_dir}{Optional. Output directory. If no value given, the output will be saved to \verb{out/\{experiment\}/\{genome\}/\{sublibrary\}/\{parse_analysis_subdir\}/\{integrated,unintegrated\}}.}
 
+\item{out_subdir}{Optional. Name of a subdirectory within the automatically generated output path to save output to.}
+
 \item{sample_subset}{Optional. Vector of sample IDs to subset to.}
+
+\item{cell_subset}{Optional. Vector of cell IDs to subset to.}
 
 \item{do_timestamp}{If \code{TRUE}, will save the output to a time-stamped subdirectory (e.g. \verb{20230217_105554/}).}
 
@@ -74,7 +85,13 @@ generate_qc_report(
 
 \item{integration_col}{If \code{do_integration} is \code{TRUE}, Seurat metadata column upon which to integrate the dataset.}
 
+\item{final_annotations}{Named vector of celltype annotations for the clusters/partitions in the dataset.}
+
+\item{final_annotations_lvl}{The level of grouping (cluster or partition) at which the \code{final_annotations} should be applied. Default is "partition".}
+
 \item{testing}{If \code{testing} is \code{TRUE}, a test run of the function is performed using a subset of a small dataset. The output is saved to \verb{out/test/}.}
+
+\item{rerun}{If \code{rerun} is \code{TRUE}, caches will be invalidated and all analyses will be run from scratch. If \code{FALSE} (default) and the pipeline has been run previously in the same directory, caches will be used.}
 
 \item{cluster_resolutions}{Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.}
 }

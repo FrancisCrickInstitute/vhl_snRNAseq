@@ -44,3 +44,5 @@ grep DGE_filtered | grep FALSE |
     . src/submit_generate_qc_report.sh
   done
 }
+
+

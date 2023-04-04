@@ -16,22 +16,10 @@ tumour_cells <-
 
 # get sample subset
 sample_subset <-
-  readr::read_tsv(paste0(base_dir, "/working/VHL_GERMLINE/tidda/parse_pipeline/expdata/sample_subset.txt"),
-                  col_names = F)$X1
+  readr::read_tsv(paste0(base_dir, "/working/VHL_GERMLINE/tidda/parse_pipeline/expdata/sample_subset.tsv"))$sample
 
 # split samples by patient
 patient_subsets <- sample_subset %>% split(get_patients_from_samples(sample_subset))
-
-# run on all tumour cells
-generate_qc_report(
-  experiment = c("221202_A01366_0326_AHHTTWDMXY",
-                 "230210_A01366_0351_AHNHCFDSX5"),
-  sublibrary = c("SHE5052A9_S101", "comb"),
-  cell_subset = tumour_cells,
-  sample_subset = sample_subset,
-  remove_doublets = F,
-  out_subdir = "tumour_cells"
-)
 
 # run on each patient
 purrr::map(names(patient_subsets), function(patient) {
@@ -43,7 +31,7 @@ purrr::map(names(patient_subsets), function(patient) {
     sample_subset = patient_subsets[[patient]],
     remove_doublets = F,
     do_cell_cycle_scoring = F,
-    out_subdir = patient,
+    out_subdir = paste0("tumour_cells/", patient, "/"),
     rerun = F
   )
 })
@@ -63,4 +51,15 @@ purrr::map(names(patient_subsets), function(patient) {
     rerun = F
   )
 })
+
+# run on all tumour cells
+generate_qc_report(
+  experiment = c("221202_A01366_0326_AHHTTWDMXY",
+                 "230210_A01366_0351_AHNHCFDSX5"),
+  sublibrary = c("SHE5052A9_S101", "comb"),
+  cell_subset = tumour_cells,
+  sample_subset = sample_subset,
+  remove_doublets = F,
+  out_subdir = "tumour_cells"
+)
 

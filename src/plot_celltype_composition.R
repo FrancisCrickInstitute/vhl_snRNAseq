@@ -1,12 +1,12 @@
+# config
 base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
                    "/Volumes/TracerX/",
                    "/camp/project/tracerX/")
 setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 devtools::load_all()
-
 out_dir <- "out/230210_A01366_0351_AHNHCFDSX5_x_221202_A01366_0326_AHHTTWDMXY/hg38/comb_x_SHE5052A9_S101/all-well/DGE_filtered/unintegrated/"
-
 out <- get_out(out_dir)
+
 
 # plot annotations on umap
 cds <- readRDS(paste0(out$cache, "cds_annotated.rds"))
@@ -19,11 +19,110 @@ dittoSeq::dittoDimPlot(cds, "partition_lineage") +
     umap_void_theme + ggplot2::theme(legend.position = "bottom")
 dev.off()
 
+# plot heatmap of tumour interesting markers
+tum_markers <-
+  markers[c("HIF",
+            "proximal tubule", "proximal tubule (progenitor)", "proximal tubule (injured)",
+            "tumour suppressors")]
+agg_mat <-
+  monocle3::aggregate_gene_expression(
+    cds[rownames(cds) %in% unlist(tum_markers),],
+    gene_group_df = tibble::enframe(tum_markers) %>% tidyr::unnest(value) %>% dplyr::select(value, name),
+    cell_group_df = SummarizedExperiment::colData(cds)[, "cluster", drop = F] %>%
+      tibble::as_tibble(rownames = "cell"))
+agg_mat_CA9 <-
+  monocle3::aggregate_gene_expression(
+    cds[rownames(cds) == "CA9",],
+    cell_group_df = SummarizedExperiment::colData(cds)[, "cluster", drop = F] %>%
+      tibble::as_tibble(rownames = "cell"))
+agg_mat <- rbind(agg_mat, agg_mat_CA9)
+agg_mat %>%
+  tibble::as_tibble(rownames = "module") %>%
+  dplyr::select(dplyr::all_of(order))
+
+order <-
+  c("3", "5", "6", "7", "9", "10", "11", "12", "15", "17", "18", "19", "21", "23", "1", "2", "14", "16", "20", "24", "25", "4", "8", "13", "22")
+pheatmap::pheatmap(agg_mat[,order], cluster_cols = F, border_color = NA, fontsize = 12)
+
+agg_mat <-
+  monocle3::aggregate_gene_expression(
+    cds[rownames(cds) == "CA9",,drop=F],
+    cell_group_df = SummarizedExperiment::colData(cds)[, "cluster", drop = F] %>%
+      tibble::as_tibble(rownames = "cell"))
+
+
+# hif de
+p_dat <-
+  cbind(
+    as.matrix(
+      cds[rownames(cds) %in% markers$HIF,
+          SummarizedExperiment::colData(cds)$partition_lineage == "malignant",
+          drop = F]@assays@data$counts) %>%
+      rowMeans(),
+    as.matrix(
+      cds[rownames(cds) %in% markers$HIF,
+          SummarizedExperiment::colData(cds)$partition_lineage == "normal",
+          drop = F]@assays@data$counts) %>%
+      rowMeans()
+  ) %>%
+  tibble::as_tibble(rownames = "gene") %>%
+  dplyr::rename(malignant = V1, normal = V2) %>%
+  tidyr::pivot_longer(-gene)
+
+# Shapiro-Wilk normality test for the differences
+d <- with(p_dat,
+          value[name == "normal"] - value[name == "malignant"])
+shapiro.test(d)
+
+# paired samples t test
+t.test(
+  dplyr::filter(p_dat, name == "normal")$value, dplyr::filter(p_dat, name == "malignant")$value,
+  paired = T, alternative = "two.sided"
+) -> hif_paired_t
+
+p_dat %>%
+  dplyr::mutate(order = dplyr::case_when(name == "normal" ~ 1, TRUE ~ 2)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = reorder(name, order), y = log(value))) +
+  ggplot2::geom_jitter(height = 0, width = 0.2) +
+  ggplot2::geom_boxplot(alpha = 0.5) +
+  ggplot2::theme_classic() +
+  ggplot2::theme(axis.text = ggplot2::element_text(size = 12))
+
 # get celltype annotations
 cts <- readr::read_tsv(paste0(out$base, "cell_annotations.tsv")) %>%
   dplyr::mutate(patient = gsub("\\_.*", "", ifelse(grepl("K891", sample), "N23", sample))) %>%
   dplyr::group_by(sample) %>%
   dplyr::mutate(n = dplyr::n())
+
+cluster_annot_counts <-
+  SummarizedExperiment::colData(cds) %>% tibble::as_tibble() %>%
+  dplyr::count(cluster_annot) %>%
+  dplyr::mutate(cluster_annot_counts = paste0(cluster_annot, " (", n, ")")) %>%
+  dplyr::arrange(-n)
+SummarizedExperiment::colData(cds)$cluster_annot_counts <-
+  dplyr::left_join(
+    SummarizedExperiment::colData(cds) %>% tibble::as_tibble(),
+    cluster_annot_counts
+  ) %>% dplyr::pull(cluster_annot_counts)
+
+partition_lineage_counts <-
+  SummarizedExperiment::colData(cds) %>% tibble::as_tibble() %>%
+  dplyr::count(partition_lineage) %>%
+  dplyr::mutate(partition_lineage_counts = paste0(partition_lineage, " (", n, ")")) %>%
+  dplyr::arrange(-n)
+SummarizedExperiment::colData(cds)$partition_lineage_counts <-
+  dplyr::left_join(
+    SummarizedExperiment::colData(cds) %>% tibble::as_tibble(),
+    partition_lineage_counts
+  ) %>% dplyr::pull(partition_lineage_counts)
+
+pdf(paste0(out$base, "cluster_annots_umap.pdf"), height = 6, width = 20)
+dittoSeq::dittoDimPlot(cds, "cluster_annot_counts", size = 0.1) +
+  ggplot2::coord_equal() +
+  ggplot2::scale_colour_manual(ct_colours)
+dittoSeq::dittoDimPlot(cds, "partition_lineage_counts", size = 0.1) +
+  ggplot2::coord_equal()
+dev.off()
 
 # get counts (patient, sample, lineage, annot levels)
 counts <-

@@ -10,3 +10,13 @@ figs_dir=~/Desktop/figs ; mkdir $figs_dir
       $figs_dir/infercnv_${pid}.png
   done
 )
+
+cp $dir/sample_heatmap_scna_arm_full_labelled.pdf $figs_dir
+cp $dir/3p_loss_ridge.pdf $figs_dir
+cp $dir/chr3_status.pdf $figs_dir
+cp $dir/vhl_status.pdf $figs_dir
+cp $dir/chr3_status_by_lesion_type.pdf $figs_dir
+cp $dir/dea/normal_tme_vs_normal_normal_heatmap.pdf $figs_dir
+cp $dir/vhl_status_by_partition_annot.pdf $figs_dir
+cp $dir/cluster_annots_umap.pdf $figs_dir
+cp $dir/sample_composition.pdf $figs_dir

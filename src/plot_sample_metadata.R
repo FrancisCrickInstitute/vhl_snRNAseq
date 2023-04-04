@@ -44,41 +44,44 @@ growth_rates <-
   dplyr::inner_join(
    sample_metadata %>%
      dplyr::select(nih_sam_id, nih_pid, sample), .
-  ) %>%
-  # convert to long format
-  dplyr::mutate(lesion_types = gsub("\\[|\\]", "", lesion_types)) %>%
-  tidyr::separate_wider_delim(lesion_types, ", ", names = paste0("lesion_types_", 1:100),
-                              too_few = "align_start") %>%
-  dplyr::rename_with(.cols = dplyr::starts_with("size"),
-                     .fn = ~ gsub("size", "size\\_", .x)) %>%
-  dplyr::rename_with(.cols = dplyr::starts_with("rate"),
-                     .fn = ~ gsub("rate", "rate\\_", .x)) %>%
-  dplyr::mutate(across(tidyselect::starts_with(c("size_",
-                                                 "days_since_first_",
-                                                 "rate_",
-                                                 "lesion_type_")), as.character)) %>%
-  tidyr::pivot_longer(cols = tidyselect::starts_with(c("size_",
-                                                       "days_since_first_",
-                                                       "rate_",
-                                                       "lesion_type_")),
-                      names_to = c("name", "timepoint"),
-                      names_pattern = "(.*)\\_(.*)") %>%
-  dplyr::filter(!is.na(value)) %>%
-  tidyr::pivot_wider()  %>%
-  readr::type_convert() %>%
-  dplyr::group_by(ut_number) %>%
-  dplyr::select(-total_growth_rate, -crick_id)
-growth_rates <- growth_rates %>%
-  dplyr::left_join(
-    growth_rates %>%
-      dplyr::filter(timepoint == 1 | timepoint == max(timepoint)) %>%
-      dplyr::transmute(ut_number,
-                       name = dplyr::case_when(timepoint == 1 ~ "size_start",
-                                            TRUE ~ "size_end"),
-                       value = size) %>%
-      tidyr::pivot_wider()
-  ) %>%
-  dplyr::mutate(annual_growth_rate = (size_end - size_start) / max(days_since_first) * 365)
+  ) #%>%
+  # # convert to long format
+  # dplyr::mutate(lesion_types = gsub("\\[|\\]", "", lesion_types)) %>%
+  # tidyr::separate_wider_delim(lesion_types, ", ", names = paste0("lesion_types_", 1:100),
+  #                             too_few = "align_start") %>%
+#   dplyr::rename_with(.cols = dplyr::starts_with("size"),
+#                      .fn = ~ gsub("size", "size\\_", .x)) %>%
+#   dplyr::rename_with(.cols = dplyr::starts_with("rate"),
+#                      .fn = ~ gsub("rate", "rate\\_", .x)) %>%
+#   dplyr::mutate(across(tidyselect::starts_with(c("size_",
+#                                                  "days_since_first_",
+#                                                  "rate_",
+#                                                  "lesion_type_")), as.character)) %>%
+#   tidyr::pivot_longer(cols = tidyselect::starts_with(c("size_",
+#                                                        "days_since_first_",
+#                                                        "rate_",
+#                                                        "lesion_type_")),
+#                       names_to = c("name", "timepoint"),
+#                       names_pattern = "(.*)\\_(.*)") %>%
+#   dplyr::filter(!is.na(value)) %>%
+#   tidyr::pivot_wider()  %>%
+#   readr::type_convert() %>%
+#   dplyr::group_by(ut_number) %>%
+#   dplyr::select(-total_growth_rate, -crick_id)
+# growth_rates <- growth_rates %>%
+#   dplyr::left_join(
+#     growth_rates %>%
+#       dplyr::filter(timepoint == 1 | timepoint == max(timepoint)) %>%
+#       dplyr::transmute(ut_number,
+#                        name = dplyr::case_when(timepoint == 1 ~ "size_start",
+#                                             TRUE ~ "size_end"),
+#                        value = size) %>%
+#       tidyr::pivot_wider()
+#   ) %>%
+#   dplyr::mutate(annual_growth_rate = (size_end - size_start) / max(days_since_first) * 365)
+growth_rates <-
+  growth_rates %>%
+  dplyr::distinct(nih_pid, sample, total_growth_rate)
 
 # pp (purity, ploidy, wgII)
 pp <-
@@ -196,6 +199,12 @@ genotypes <-
   dplyr::full_join(scna_cyto_drivers, multiple = "all") %>%
   # add scnas
   dplyr::full_join(scnas, multiple = "all")
+
+# write full clinical annotations file
+genotypes %>%
+  readr::write_tsv(paste0(out$base, "clinical_and_genotype_annotations.tsv"))
+growth_rates %>%
+  readr::write_tsv(paste0(out$base, "growth_rates.tsv"))
 
 # heatmap
 p_dat <-
@@ -328,6 +337,34 @@ p_scna_arm <-
   plot_cn(p_dat, "scna_arm") +
   ggplot2::theme(legend.position = "none")
 
+# chromosome lengths
+chr_len <-
+  readr::read_tsv("data/gencode/chromosomes.tsv") %>%
+  dplyr::transmute(y_n = as.numeric(gsub("chr", "", chr)),
+                   ratio = length / max(length),
+                   y_cumsum = cumsum(ratio),
+                   y_pos = y_cumsum - 0.5 * ratio) %>%
+  dplyr::filter(!is.na(y_n)) %>%
+  dplyr::left_join(tibble::tibble(
+    y = apply(expand.grid(1:22, c("p", "q")), 1, paste, collapse="") %>% gsub(" ", "", .),
+    y_n = rep(1:22, 2)),
+    multiple = "all"
+  ) %>%
+  dplyr::mutate(y_pos = dplyr::case_when(grepl("p", y) ~ y_cumsum - 0.25*ratio,
+                                         grepl("q", y) ~ y_cumsum + 0.25*ratio))
+
+# infercnv sample order
+infercnv_sample_order <-
+  tibble::tibble(
+    sample = c(
+      "N059_V103", "N059_V102A", "N059_V003", "N059_M001",
+      "N088_V108", "N088_V106", "N088_V008", "N088_V006", "N088_V004",
+      "N045_V008C", "N045_V004", "N045_V003",
+      "N090_V127", "N090_V126", "N090_V124D", "N090_V124A", "N090_V116",
+      "K891_V014")
+  ) %>% dplyr::mutate(sample_order = dplyr::row_number())
+
+
 # full chrom arm level events
 p_scna_all_dat <-
   tibble::tibble(
@@ -336,11 +373,14 @@ p_scna_all_dat <-
     A = 1
   ) %>%
   dplyr::cross_join(
-    tibble::tibble(sample = unique(p_dat$sample))
+    p_dat %>% dplyr::distinct(nih_pid, sample)
   ) %>%
-  dplyr::full_join(
+  dplyr::inner_join(
+    infercnv_sample_order
+  ) %>%
+  dplyr::left_join(
     genotypes %>%
-      dplyr::transmute(sample,
+      dplyr::transmute(sample, nih_pid,
                        y = gsub(".*\\_", "", scna_arm),
                        y_direction = scna_arm_direction,
                        y_n = as.numeric(gsub("q|p", "", y)),
@@ -356,20 +396,25 @@ p_scna_all_dat <-
   dplyr::distinct() %>%
   dplyr::arrange(y_n) %>%
   dplyr::mutate(order = dplyr::row_number(),
-                y_no_na = tidyr::replace_na(y, ""))
+                y_no_na = tidyr::replace_na(y, "")) %>%
+  dplyr::left_join(chr_len)
 p_scna_all <-
   p_scna_all_dat %>%
-  ggplot2::ggplot() +
-  ggplot2::geom_tile(ggplot2::aes(x = sample, y = reorder(y_no_na, -order), fill = y_direction), colour = "white") +
+  dplyr::filter(!is.na(sample)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = reorder(sample, -sample_order),
+                               y = reorder(y_no_na, -order),
+                               height = 1)) +
+  ggplot2::geom_tile(ggplot2::aes(fill = y_direction), colour = "white") +
   ggplot2::theme_void() +
   ggplot2::labs(fill = "direction") +
   ggplot2::theme(axis.text.y = ggplot2::element_text(hjust = 1, size = 7),
                  legend.position = "none") +
   ggplot2::scale_fill_manual(values = variable_colours[["scna_arm"]],
-                             na.value = "white") +
+                             na.value = "white")  +
   ggplot2::geom_line(data = data.frame(x = c(0, length(unique(p_scna_all_dat$sample))) + 0.5,
-                                       y = rep(seq(1, length(unique(p_scna_all_dat$y)), by = 2), each = 2) - 0.5),
-            ggplot2::aes(x, y, group = y), colour = "grey") +
+                                       y = rep(seq(1, length(unique(p_scna_all_dat$y)), by = 2),
+                                               each = 2) - 0.5),
+                     ggplot2::aes(x, y, group = y), colour = "grey") +
   ggplot2::geom_text(data = p_scna_all_dat,
                      ggplot2::aes(x = sample, y = reorder(y_no_na, -order), label = driver),
                      colour = "white", vjust = 0.8)
@@ -400,6 +445,6 @@ list(p_patients, p_scna_all) %>%
   patchwork::wrap_plots(ncol = 1, heights = c(1, 30))
 dev.off()
 
-pdf(paste0(out$base, "sample_heatmap_scna_arm_full_labelled.pdf"), width = 6, height = 8)
-p_scna_all + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 270, hjust = 0))
+pdf(paste0(out$base, "sample_heatmap_scna_arm_full_labelled.pdf"), width = 20, height = 8)
+p_scna_all + ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 270, hjust = 0, size = 7))
 dev.off()

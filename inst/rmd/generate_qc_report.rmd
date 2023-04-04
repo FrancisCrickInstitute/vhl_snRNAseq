@@ -693,7 +693,7 @@ final_umap <-
       ggplot2::aes(x, y, label = `get(lvl)`),
       size = 3, fill = "white", alpha = 0.7, label.size = NA) +
     umap_void_theme
-  }) 
+  })  
 names(final_umap) <- lvls
 p <- 
   final_umap[["cluster"]] + final_umap[["partition"]]
@@ -716,7 +716,7 @@ cds_markers <- xfun::cache_rds({
   cds_markers <- 
     lvls %>%
     purrr::map(function(lvl) {
-      top_markers_develop(cds, group_cells_by = lvl)
+      top_markers_develop(cds, group_cells_by = lvl, genes_to_test_per_group = 100)
     }) %>%
     setNames(lvls)
   cds_markers
@@ -733,7 +733,8 @@ top_cds_markers <-
       dplyr::arrange(desc(as.numeric(cell_group))) %>%
       dplyr::top_n(3, pseudo_R2)
   })
-readr::write_tsv(top_cds_markers %>% dplyr::bind_rows(.id = "cell_grouping"), paste0(out$dea, "top_3_markers.tsv"))
+readr::write_tsv(top_cds_markers %>% dplyr::bind_rows(.id = "cell_grouping"), 
+                 paste0(out$dea, "top_3_markers.tsv"))
 ```
 
 ```{r top_markers, eval = T, class.source = 'fold-hide', fig.dim = c(10, dplyr::n_distinct(monocle3::clusters(cds))), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}

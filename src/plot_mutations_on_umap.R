@@ -52,9 +52,65 @@ SummarizedExperiment::colData(cds) <-
       dplyr::select(-cell, -sample)
   )
 
+SummarizedExperiment::colData(cds)$vhl_status <-
+  SummarizedExperiment::colData(cds) %>%
+  tibble::as_tibble() %>%
+  dplyr::mutate(vhl_status = dplyr::case_when(
+    partition_lineage == "immune" ~ NA,
+    has_loss_chr3 == 1 & VHL_mut == 1 ~ "VHL mut + 3p loss",
+    has_loss_chr3 == 1 ~ "3p loss",
+    VHL_mut == 1 ~ "VHL mut",
+    TRUE ~ "WT")) %>%
+  dplyr::pull(vhl_status)
+
 # save cds
 saveRDS(cds, paste0(out$cache, "cds_infercnv.rds"))
 # cds <- readRDS(paste0(out$cache, "cds_infercnv.rds"))
+
+# get col_data
+col_data <- SummarizedExperiment::colData(cds) %>% tibble::as_tibble(rownames = "cell")
+  
+kruskal.test(proportion_scaled_loss_chr3 ~ cluster_annot, 
+             data = SummarizedExperiment::colData(cds) %>%
+               tibble::as_tibble())
+
+col_data %>%
+  dplyr::filter(partition_lineage != "immune") %>%
+  {
+    pairwise.wilcox.test(.$proportion_scaled_loss_chr3, 
+                         .$partition_lineage,
+                         p.adjust.method = "BH")
+  }
+col_data %>%
+  dplyr::filter(partition_lineage != "immune") %>%
+  dplyr::group_by(partition_lineage) %>%
+  dplyr::summarise(mean(proportion_scaled_loss_chr3, na.rm = T))
+  
+# ridge plot
+pdf(paste0(out$base, "3p_loss_ridge.pdf"))
+ridge_3p <- list()
+purrr::walk(c("malignant", "normal"), function(lin) {
+  p_dat <-
+    cds[, SummarizedExperiment::colData(cds)$partition_lineage == lin]
+  ridge_3p[[lin]] <<-
+    dittoSeq::dittoRidgePlot(
+      p_dat,
+      "proportion_scaled_loss_chr3",
+      group.by = "cluster_annot",
+      ylab = "scaled proportion of chr3 loss",
+      ridgeplot.lineweight = 0.5, 
+      legend.show = F, main = NULL) +
+    ggplot2::lims(x = c(-0.15, 0.75)) +
+    ggplot2::theme(axis.title = ggplot2::element_blank(),
+                   axis.text = ggplot2::element_text(size = 15))
+})
+patchwork::wrap_plots(
+  list(
+    ridge_3p$malignant + 
+      ggplot2::scale_fill_manual(values = "darkred"),
+    ridge_3p$normal),
+  ncol = 1, heights = c(1, 3))
+dev.off()
 
 # plot mutations
 muts_to_plot <-
@@ -64,10 +120,139 @@ muts_to_plot <-
 monocle3::plot_cells(cds, color_cells_by = "VHL_mut")
 monocle3::plot_cells(cds, color_cells_by = "PBRM1_mut")
 
+pdf(paste0(out$base, "chr3_status_by_lesion_type.pdf"), width = 16, height = 13)
+unique(col_data$lesion_type) %>%
+  purrr::map(function(lt) {
+    cds[,col_data$lesion_type == lt] %>%
+      monocle3::plot_cells(color_cells_by = "has_loss_chr3") +
+      ggplot2::labs(title = lt)
+  }) %>%
+  patchwork::wrap_plots(ncol = 2)
+dev.off()
 
+vhl_status_colours <- c("3p loss" = "#F0E442",
+                        "VHL mut" = "#ff82da",
+                        "VHL mut + 3p loss" = "#98DFD6",
+                        "WT" = "#00235B"
+)
+
+pdf(paste0(out$base, "vhl_status.pdf"))
+monocle3::plot_cells(cds, color_cells_by = "vhl_status", 
+                     label_cell_groups = F) +
+  ggplot2::scale_colour_manual(values = vhl_status_colours) +
+  ggplot2::coord_equal()
+dev.off()
+
+
+c(0, 1) %>%
+  purrr::map(function(chr3) {
+    chr3_loss_subset <-
+      SummarizedExperiment::colData(cds)$has_loss_chr3 == chr3 &
+      SummarizedExperiment::colData(cds)$partition_annot == "epithelial"
+    chr3_loss_subset[is.na(chr3_loss_subset)] <- FALSE
+    SummarizedExperiment::colData(cds)$has_loss_chr3 <-
+      as.character(SummarizedExperiment::colData(cds)$has_loss_chr3)
+    cds[,chr3_loss_subset] %>%
+      monocle3::plot_cells(color_cells_by = "has_loss_chr3") +
+      ggplot2::scale_colour_manual(values = c("0" = "#00235B", "1" = "#F0E442")) +
+      ggplot2::coord_equal() +
+      ggplot2::theme_void() +
+      ggplot2::theme(legend.position = "none")
+  }) %>%
+  patchwork::wrap_plots(ncol = 2)
+
+
+cds[,SummarizedExperiment::colData(cds)$partition_lineage %in% c("normal", "malignant")] %>%
+  monocle3::plot_cells(color_cells_by = "partition_lineage", label_cell_groups = F) +
+  ggplot2::scale_colour_manual(values = c("malignant" = "#56B4E9", 
+                                          "normal" = "#009E73")) +
+  ggplot2::coord_equal() +
+  ggplot2::theme_void() +
+  ggplot2::theme(legend.position = "none")
+
+
+monocle3::plot_cells(cds, color_cells_by = "partition") +
+  ggplot2::coord_equal() +
+  ggplot2::theme_void() +
+  ditto_colours
+
+pdf(paste0(out$base, "chr3_status_by_lesion_type.pdf"), width = 16, height = 13)
+unique(col_data$lesion_type) %>%
+  purrr::map(function(lt) {
+    cds[,col_data$lesion_type == lt] %>%
+      monocle3::plot_cells(color_cells_by = "vhl_status") +
+      ggplot2::labs(title = lt) +
+      ggplot2::scale_colour_manual(values = vhl_status_colours)
+  }) %>%
+  patchwork::wrap_plots(ncol = 2)
+dev.off()
+
+pdf(paste0(out$base, "vhl_status_by_partition_annot.pdf"))
+col_data %>%
+  dplyr::filter(partition_lineage != "immune") %>%
+  dplyr::inner_join(
+    col_data %>% 
+      dplyr::count(partition_annot, vhl_status) %>%
+      dplyr::group_by(partition_annot) %>%
+      dplyr::mutate(prop = (n / sum(n)) * 100) %>%
+      dplyr::filter(vhl_status == "3p loss") %>%
+      dplyr::select(partition_annot, prop, n) %>%
+      dplyr::filter(n > 10)
+    ) %>%
+  dplyr::mutate(lesion_type = factor(lesion_type, 
+                                         levels = c("solid",
+                                                    "renal_cyst",
+                                                    "metastasis",
+                                                    "normal_renal"))) %>%
+  ggplot2::ggplot(ggplot2::aes(x = reorder(partition_annot, -n), 
+                               fill = vhl_status)) +
+  ggplot2::geom_bar() +
+  ggplot2::theme_classic() +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 270, hjust = 0, vjust = 0)) +
+  ggplot2::scale_fill_manual(values = vhl_status_colours) +
+  ggplot2::facet_grid(~ lesion_type, scales = "free", space = "free")
+dev.off()
+
+col_data %>%
+  dplyr::count(lesion_type, vhl_status)
+
+col_data %>%
+  dplyr::filter(partition_lineage != "immune") %>%
+  dplyr::left_join(
+    col_data %>% 
+      dplyr::count(partition, vhl_status) %>%
+      dplyr::group_by(partition) %>%
+      dplyr::mutate(prop = (n / sum(n)) * 100) %>%
+      dplyr::filter(vhl_status == "3p loss") %>%
+      dplyr::select(partition, prop, n)
+  ) %>%
+  ggplot2::ggplot(ggplot2::aes(x = reorder(partition, -prop), 
+                               fill = vhl_status)) +
+  ggplot2::geom_bar(position = "fill") +
+  ggplot2::theme_classic() +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 270, hjust = 0)) +
+  ggplot2::scale_fill_manual(values = vhl_status_colours) +
+  ggplot2::facet_grid(~partition_lineage, scales = "free", space = "free")
+
+# get hif activation
+agg_hif <-
+  monocle3::aggregate_gene_expression(
+  cds[rownames(cds) %in% c(markers$HIF), 
+      col_data$partition_lineage != "immune" & !is.na(col_data$has_loss_chr3)],
+  cell_group_df = col_data %>% 
+    dplyr::transmute(cell, 
+                     lin_chr = paste(partition_annot, has_loss_chr3, sep = "_")))
+pheatmap::pheatmap(agg_hif, scale = "row", clustering_method = "ward.D2")
 
 # plot driver losses on umap
-dittoSeq::dittoDimPlot(cds, "has_loss_chr3", size = 0.1)
+pdf(paste0(out$base, "chr3_status.pdf"), width = 16, height = 13)
+c("has_loss_chr3", "VHL_mut", "partition_annot", "sample") %>%
+  purrr::map(function(var) {
+    p <- monocle3::plot_cells(cds, color_cells_by = var, label_cell_groups = F)
+    if(var %in% c("partition_annot", "sample")) { p + ditto_colours } else { p }
+  }) %>%
+  patchwork::wrap_plots(ncol = 2)
+dev.off()
 
 # plot 3p loss frequency
 prop_cn <-
