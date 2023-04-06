@@ -51,23 +51,26 @@ agg_mat <-
       tibble::as_tibble(rownames = "cell"))
 
 
-# hif de
-p_dat <-
+# module de
+get_module_exp <- function(module) {
   cbind(
     as.matrix(
-      cds[rownames(cds) %in% markers$HIF,
+      cds[rownames(cds) %in% markers[[module]],
           SummarizedExperiment::colData(cds)$partition_lineage == "malignant",
           drop = F]@assays@data$counts) %>%
       rowMeans(),
     as.matrix(
-      cds[rownames(cds) %in% markers$HIF,
+      cds[rownames(cds) %in% markers[[module]],
           SummarizedExperiment::colData(cds)$partition_lineage == "normal",
           drop = F]@assays@data$counts) %>%
       rowMeans()
   ) %>%
-  tibble::as_tibble(rownames = "gene") %>%
-  dplyr::rename(malignant = V1, normal = V2) %>%
-  tidyr::pivot_longer(-gene)
+    tibble::as_tibble(rownames = "gene") %>%
+    dplyr::rename(malignant = V1, normal = V2) %>%
+    tidyr::pivot_longer(-gene)
+}
+
+p_dat <- get_module_exp("HIF")
 
 # Shapiro-Wilk normality test for the differences
 d <- with(p_dat,
@@ -79,6 +82,31 @@ t.test(
   dplyr::filter(p_dat, name == "normal")$value, dplyr::filter(p_dat, name == "malignant")$value,
   paired = T, alternative = "two.sided"
 ) -> hif_paired_t
+
+# ca9 expression in normal vs malignant
+t.test(
+  cds["CA9", SummarizedExperiment::colData(cds)$partition_lineage == "malignant"]@assays@data$counts,
+  cds["CA9", SummarizedExperiment::colData(cds)$partition_lineage == "normal"]@assays@data$counts
+)
+
+# ts expression in normal vs malignant
+markers$`proximal tubule (progenitor)`[markers$`proximal tubule (progenitor)` %in% rownames(cds)] %>%
+  purrr::map(function(gene) {
+    print(gene)
+    t.test(
+      cds[gene, SummarizedExperiment::colData(cds)$partition_lineage == "malignant"]@assays@data$counts,
+      cds[gene, SummarizedExperiment::colData(cds)$partition_lineage == "normal"]@assays@data$counts
+    )
+  })
+
+p_dat <- get_module_exp("tumour suppressors")
+d <- with(p_dat,
+          value[name == "normal"] - value[name == "malignant"])
+shapiro.test(d)
+t.test(
+  dplyr::filter(p_dat, name == "normal")$value, dplyr::filter(p_dat, name == "malignant")$value,
+  paired = T, alternative = "two.sided"
+)
 
 p_dat %>%
   dplyr::mutate(order = dplyr::case_when(name == "normal" ~ 1, TRUE ~ 2)) %>%

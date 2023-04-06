@@ -72,7 +72,7 @@ scpa_out <- list()
 scpa_out[["normal_vs_malignant"]] <-
   compare_sce(cds,
               group1 = "partition_lineage",
-              group1_population = c("normal", "malignant"),
+              group1_population = c("malignant", "normal"),
               pathways = pathways)
 
 # save
@@ -98,41 +98,60 @@ split_cds <-
 
 # run
 scpa_out[["normal_tme_vs_normal_normal"]] <- list()
-for (ct in cell_types) {
-  print(ct)
-  normal <- sce_extract(split_cds$normal,
-                        meta1 = "cluster_annot",
-                        value_meta1 = ct)
-  tumour <- sce_extract(split_cds$tumour,
-                        meta1 = "cluster_annot",
-                        value_meta1 = ct)
-  scpa_out[["normal_tme_vs_normal_normal"]][[ct]] <-
-    compare_pathways(list(normal, tumour), pathways) %>%
-    select(Pathway, qval) %>%
-    set_colnames(c("Pathway", paste(ct, "qval", sep = "_")))
-}
-scpa_out[["normal_tme_vs_normal_normal"]] <-
-  scpa_out[["normal_tme_vs_normal_normal"]] %>%
-  purrr::reduce(full_join, by = "Pathway") %>%
-  set_colnames(gsub(colnames(.), pattern = " ", replacement = "_")) %>%
-  select(c("Pathway", grep("_qval", colnames(.)))) %>%
-  filter_all(any_vars(. > 2)) %>%
-  tibble::column_to_rownames("Pathway")
-scpa_out[["normal_tme_vs_normal_normal"]] <-
-  scpa_out[["normal_tme_vs_normal_normal"]][rowMeans(scpa_out[["normal_tme_vs_normal_normal"]]) > 0,]
-col_hm <- colorRamp2(colors = c("blue", "white", "red"), breaks = c(0, 3, 6))
-pdf(paste0(out$dea, "normal_tme_vs_normal_normal_heatmap.pdf"))
-Heatmap(scpa_out[["normal_tme_vs_normal_normal"]],
+cell_types %>%
+  purrr::walk(function(ct) {
+    print(ct)
+    normal <- sce_extract(split_cds$normal,
+                          meta1 = "cluster_annot",
+                          value_meta1 = ct)
+    tumour <- sce_extract(split_cds$tumour,
+                          meta1 = "cluster_annot",
+                          value_meta1 = ct)
+    scpa_out[["normal_tme_vs_normal_normal"]][[ct]] <<-
+      compare_pathways(list(tumour, normal), pathways)
+  })
+scpa_out[["normal_tme_vs_normal_normal"]] %>%
+  dplyr::bind_rows(.id = "celltype") %>%
+  tibble::as_tibble() %>%
+  #dplyr::filter(qval > 2 & adjPval < 0.01) %>%
+  dplyr::group_by(celltype) %>%
+  dplyr::arrange(desc(qval)) %>%
+  tidyr::pivot_wider(id_cols = "Pathway", names_from = "celltype", values_from = "qval") %>%
+  tibble::column_to_rownames("Pathway") -> mat
+mat[is.na(mat)] <- 0
+max_q <- ceiling(max(mat))
+col_hm <- colorRamp2(colors = c("blue", "white", "red"), breaks = c(0, max_q/2, max_q))
+Heatmap(mat,
         col = col_hm,
         name = "Qval",
-        column_labels = colnames(scpa_out[["normal_tme_vs_normal_normal"]]) %>% gsub("\\_", " ", .) %>% gsub(" qval", "", .),
-        row_labels = rownames(scpa_out[["normal_tme_vs_normal_normal"]]) %>% fix_pathway_names(),
+        column_labels = colnames(mat),
+        row_labels = rownames(mat) %>% fix_pathway_names(),
         row_names_gp = gpar(fontsize = 8),
         column_names_gp = gpar(fontsize = 8),
-        border = T,
-        column_km = 3,
-        row_km = 2)
-dev.off()
+        border = T)
+
+# scpa_out[["normal_tme_vs_normal_normal"]] <-
+#   scpa_out[["normal_tme_vs_normal_normal"]] %>%
+#   purrr::reduce(full_join, by = "Pathway") %>%
+#   set_colnames(gsub(colnames(.), pattern = " ", replacement = "_")) %>%
+#   select(c("Pathway", grep("_qval", colnames(.)))) %>%
+#   filter_all(any_vars(. > 2)) %>%
+#   tibble::column_to_rownames("Pathway")
+# scpa_out[["normal_tme_vs_normal_normal"]] <-
+#   scpa_out[["normal_tme_vs_normal_normal"]][rowMeans(scpa_out[["normal_tme_vs_normal_normal"]]) > 0,]
+# col_hm <- colorRamp2(colors = c("blue", "white", "red"), breaks = c(0, 3, 6))
+# pdf(paste0(out$dea, "normal_tme_vs_normal_normal_heatmap.pdf"))
+# Heatmap(scpa_out[["normal_tme_vs_normal_normal"]],
+#         col = col_hm,
+#         name = "Qval",
+#         column_labels = colnames(scpa_out[["normal_tme_vs_normal_normal"]]) %>% gsub("\\_", " ", .) %>% gsub(" qval", "", .),
+#         row_labels = rownames(scpa_out[["normal_tme_vs_normal_normal"]]) %>% fix_pathway_names(),
+#         row_names_gp = gpar(fontsize = 8),
+#         column_names_gp = gpar(fontsize = 8),
+#         border = T,
+#         column_km = 3,
+#         row_km = 2)
+# dev.off()
 
 list(
   monocle3::plot_cells(
@@ -170,7 +189,7 @@ for (ct in cell_types) {
                         meta1 = "partition_annot",
                         value_meta1 = ct)
   scpa_out[["normal_tme_vs_normal_normal_lineages"]][[ct]] <-
-    compare_pathways(list(normal, tumour), pathways) %>%
+    compare_pathways(list(tumour, normal), pathways) %>%
     select(Pathway, qval) %>%
     set_colnames(c("Pathway", paste(ct, "qval", sep = "_")))
 }
@@ -213,7 +232,7 @@ scpa_out[["normal_vs_malignant_partitions"]] <-
     print(partition)
     control <- as.matrix(cds[, SummarizedExperiment::colData(cds)$partition_lineage == "normal"]@assays@data$logcounts)
     test <- as.matrix(cds[, monocle3::partitions(cds) == partition]@assays@data$logcounts)
-    compare_pathways(list(control, test), pathways = cancer_pathways)
+    compare_pathways(list(test, control), pathways = cancer_pathways)
   }) %>%
   setNames(malignant_partitions) %>%
   dplyr::bind_rows(.id = "partition")
@@ -242,7 +261,7 @@ scpa_out[["normal_vs_malignant_lesion_types"]] <-
     control <- as.matrix(cds[, SummarizedExperiment::colData(cds)$partition_lineage == "normal"]@assays@data$logcounts)
     test <- as.matrix(cds[, SummarizedExperiment::colData(cds)$lesion_type == lesion_type &
                             SummarizedExperiment::colData(cds)$partition_lineage == "malignant"]@assays@data$logcounts)
-    compare_pathways(list(control, test), pathways = pathways)
+    compare_pathways(list(test, control), pathways = pathways)
   }) %>%
   setNames(malignant_lesion_types) %>%
   dplyr::bind_rows(.id = "lesion_type")
@@ -265,7 +284,7 @@ scpa_out[["normal_vhl_statuses"]] <-
                                SummarizedExperiment::colData(cds)$partition_lineage == "normal"]@assays@data$logcounts)
     test <- as.matrix(cds[, SummarizedExperiment::colData(cds)$vhl_status == vhl_stat &
                             SummarizedExperiment::colData(cds)$partition_lineage == "normal"]@assays@data$logcounts)
-    compare_pathways(list(control, test), pathways = pathways)
+    compare_pathways(list(test, control), pathways = pathways)
   }) %>%
   setNames(vhl_statuses) %>%
   dplyr::bind_rows(.id = "vhl_status")
@@ -275,15 +294,20 @@ saveRDS(scpa_out[["normal_vhl_statuses"]],
         paste0(out$dea, "scpa_normal_vhl_statuses.rds"))
 
 # vhl loss in epithelial cells
-control <- as.matrix(cds[, SummarizedExperiment::colData(cds)$vhl_status == "WT" &
-                           SummarizedExperiment::colData(cds)$partition_annot == "epithelial"]@assays@data$logcounts)
+control <- as.matrix(
+  cds[, SummarizedExperiment::colData(cds)$vhl_status == "WT" &
+        SummarizedExperiment::colData(cds)$partition_annot == "epithelial"]@assays@data$logcounts)
 chr3_loss_subset <-
   SummarizedExperiment::colData(cds)$has_loss_chr3 == 1 &
   SummarizedExperiment::colData(cds)$partition_annot == "epithelial"
 chr3_loss_subset[is.na(chr3_loss_subset)] <- FALSE
 test <- as.matrix(cds[, chr3_loss_subset]@assays@data$logcounts)
 scpa_out[["normal_chr3_loss"]] <-
-    compare_pathways(list(control, test), pathways = pathways)
+    compare_pathways(list(test, control), pathways = pathways)
+
+# save
+saveRDS(scpa_out[["normal_chr3_loss"]],
+        paste0(out$dea, "scpa_normal_chr3_loss.rds"))
 
 # find top markers
 top_chr3_loss_markers <-
@@ -303,7 +327,7 @@ scpa_out[["malignant_solid_vs_malignant_nonsolid"]] <-
                                SummarizedExperiment::colData(cds)$partition_lineage == "malignant"]@assays@data$logcounts)
     test <- as.matrix(cds[, SummarizedExperiment::colData(cds)$lesion_type == lesion_type &
                             SummarizedExperiment::colData(cds)$partition_lineage == "malignant"]@assays@data$logcounts)
-    compare_pathways(list(control, test), pathways = pathways)
+    compare_pathways(list(test, control), pathways = pathways)
   }) %>%
   setNames(malignant_nonsolid_lesion_types) %>%
   dplyr::bind_rows(.id = "lesion_type")
@@ -313,11 +337,64 @@ saveRDS(scpa_out[["malignant_solid_vs_malignant_nonsolid"]],
         paste0(out$dea, "scpa_malignant_solid_vs_malignant_nonsolid.rds"))
 
 # read
-scpa_files <- list.files(out$dea, pattern = "scpa", full.names = T)
+scpa_files <- list.files(out$dea, pattern = "scpa.*rds", full.names = T)
 scpa_out <-
   scpa_files %>%
   lapply(readRDS) %>%
   setNames(scpa_files %>% basename %>% tools::file_path_sans_ext() %>% gsub("scpa\\_", "", .))
+
+# write to tables
+names(scpa_out) %>%
+  purrr::map(function(comparison) {
+    readr::write_tsv(scpa_out[[comparison]],
+                     paste0(out$dea, "/scpa_", comparison, ".tsv"))
+  })
+
+# write final tables
+scpa_out$normal_vs_malignant %>%
+  tibble::as_tibble() %>%
+  dplyr::filter(qval > 2 & adjPval < 0.01) %>%
+  dplyr::slice_max(qval, n = 10) %>%
+  dplyr::arrange(desc(abs(FC))) %>%
+  dplyr::transmute(pathway = fix_pathway_names(Pathway),
+                   `adjusted p` = adjPval,
+                   q = qval,
+                   FC) %>%
+  readr::write_tsv(paste0(out$dea, "normal_vs_malignant_final.tsv"))
+scpa_out$normal_tme_vs_normal_normal %>%
+  dplyr::bind_rows(.id = "celltype") %>%
+  tibble::as_tibble() %>%
+  dplyr::filter(qval > 2 & adjPval < 0.01) %>%
+  dplyr::group_by(celltype) %>%
+  dplyr::slice_max(qval, n = 10) %>%
+  dplyr::arrange(desc(abs(FC))) %>%
+  dplyr::transmute(celltype,
+                   pathway = fix_pathway_names(Pathway),
+                   `adjusted p` = adjPval,
+                   q = qval,
+                   FC) %>%
+  readr::write_tsv(paste0(out$dea, "normal_tme_vs_normal_normal_final.tsv"))
+
+scpa_out$normal_tme_vs_normal_normal %>%
+  tibble::as_tibble() %>%
+  dplyr::transmute(pathway = fix_pathway_names(Pathway),
+                   `adjusted p` = adjPval,
+                   q = qval,
+                   FC) %>%
+  dplyr::slice_max(q, n = 10)
+
+# write top 5 pathways per table
+scpa_out$normal_vs_malignant %>%
+  tibble::as_tibble() %>%
+  dplyr::slice_max(order_by = qval, n = 5)
+scpa_out$normal_tme_vs_normal_normal %>%
+  tibble::as_tibble(rownames = "Pathway") %>%
+  tidyr::pivot_longer(-Pathway, names_to = "celltype", values_to = "qval") %>%
+  dplyr::mutate(celltype = gsub("\\_qval", "", celltype)) %>%
+  dplyr::group_by(celltype) %>%
+  dplyr::slice_max(order_by = qval, n = 1)
+scpa_out$
+
 
 # get clinical and genotype annotations
 clin_data <-
@@ -329,6 +406,7 @@ plot_my_heatmap(scpa_out$normal_vhl_statuses, "vhl_status")
 plot_my_heatmap(scpa_out$normal_vs_malignant_partitions, "partition")
 plot_my_heatmap(scpa_out$normal_vs_malignant_lesion_types, "lesion_type")
 plot_my_heatmap(scpa_out$malignant_solid_vs_malignant_nonsolid, "lesion_type")
+
 plot_my_enrichment(scpa_out$malignant_solid_vs_malignant_nonsolid)
 plot_my_enrichment(scpa_out$normal_chr3_loss,
                    top_n = 6)
@@ -346,5 +424,5 @@ plot_my_enrichment(scpa_out$normal_vs_malignant_lesion_types %>%
                    top_n = 5)
 plot_my_enrichment(scpa_out$normal_vs_malignant,
                    top_n = 5)
-dev.off()
+
 
