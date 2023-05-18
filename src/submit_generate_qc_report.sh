@@ -19,6 +19,7 @@ echo "Sublibrary: $sublibrary"
 echo "Parse analysis subdirectory: $parse_analysis_subdir"
 echo "Integration: $do_integration"
 echo "Sample subset: $sample_subset"
+echo "Output directory: $out_dir"
 echo "Script: $script"
 echo "Memory allocation: $mem GB"
 echo "------------------------------"
@@ -30,6 +31,7 @@ sublibrary=$sublibrary
 parse_analysis_subdir=$parse_analysis_subdir
 do_integration=$do_integration
 sample_subset=$sample_subset
+out_dir=$out_dir
 
 # get directories
 cd $(pwd) ; . src/config.sh
@@ -41,7 +43,8 @@ Rscript src/run_generate_qc_report.R \
   $sublibrary \
   $parse_analysis_subdir \
   $do_integration \
-  $sample_subset
+  $sample_subset \
+  $out_dir
 EOF
 
 # submit the script

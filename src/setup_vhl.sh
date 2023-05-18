@@ -31,5 +31,7 @@ conda create -n vhl2 -c conda-forge -c bioconda -c r \
   r-monocle3 \
   r-r.utils \
   bioconductor-infercnv
+  nextflow \
+  nf-core
 
 # devtools::install_github("satijalab/seurat-wrappers")

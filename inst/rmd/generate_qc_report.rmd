@@ -30,6 +30,7 @@ args <- list(
   genome = "hg38",
   sublibrary = "SHE5052A9_S101",
   parse_analysis_subdir = "all-well/DGE_filtered/",
+  dge_mtx_dir = NULL,
   remove_doublets = T,
   do_filtering = T,
   min_nuclei_per_gene = 5,
@@ -45,7 +46,9 @@ args <- list(
   sample_subset = c("N090_V124A", "N090_V127"),
   final_annotations = NULL,
   testing = T,
-  rerun = F
+  rerun = F,
+  do_add_sample_metadata = do_add_sample_metadata,
+  do_add_summary_stats = do_add_summary_stats
 )
 out <- list(
   base = "out/test/",
@@ -107,13 +110,14 @@ seu <- xfun::cache_rds({
     genome,
     sublibrary,
     parse_analysis_subdir,
+    dge_mtx_dir,
     min_nFeature_RNA = 0,
     min_nuclei_per_gene = min_nuclei_per_gene,
     sample_subset = sample_subset,
     cell_subset = cell_subset,
     remove_na_samples = T,
-    do_add_sample_metadata = T,
-    do_add_summary_stats = T,
+    do_add_sample_metadata = do_add_sample_metadata,
+    do_add_summary_stats = do_add_summary_stats,
     groupings,
     statistics
   )

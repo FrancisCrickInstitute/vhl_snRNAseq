@@ -19,12 +19,16 @@ greplany <- function(patterns, v) {
 # Check args
 check_args <- function(args) {
   list2env(args,globalenv())
-  dge_dir <- paste(parse_dir, "analysis", experiment, genome, sublibrary, parse_analysis_subdir, sep = "/")
+  if (!is.null(dge_mtx_dir)) {
+    dge_dir <- dge_mtx_dir
+  } else {
+    dge_dir <- paste(parse_dir, "analysis", experiment, genome, sublibrary, parse_analysis_subdir, sep = "/")
+  }
   if(!all(c("DGE.mtx", "all_genes.csv", "cell_metadata.csv") %in% list.files(dge_dir))) {
     stop("Provided directory:\n\n", dge_dir, "\n\ndoes not exist or is not a Parse Biosciences split-pipe analysis directory.",
          " Must contain DGE.mtx, all_genes.csv, and cell_metadata.csv files.")
   }
-  if(length(experiment) != length(sublibrary)) {
+  if(!is.null(experiment) & length(experiment) != length(sublibrary)) {
     stop("Length of the experiment argument does not equal the length of the sublibrary argument!")
   }
 }

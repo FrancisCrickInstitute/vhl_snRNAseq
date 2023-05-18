@@ -5,9 +5,10 @@
 #' @param genome The reference genome build used by split-pipe for alignment. Default is "hg38".
 #' @param sublibrary The sublibrary to analyse. Default is "comb". If you are combining multiple runs, pass a vector whose order matches that of the vector passed to `experiment`.
 #' @param parse_analysis_subdir Parse Biosciences split-pipe DGE subdirectory. This directory must contain `DGE.mtx`, `all_genes.csv`, and `cell_metadata.csv` files. This will indicate which wells to include and whether to use the `DGE_filtered/` or `DGE_unfiltered/` matrix. Default is "all-well/DGE_filtered/".
+#' @param dge_mtx_dir Optional. Full path to the directory containing the `DGE.mtx` file produced by Parse Biosciences split-pipe.
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
-#' @param do_cell_cycle_scoring If `TRUE`, scores cells by cell cycle stage. 
+#' @param do_cell_cycle_scoring If `TRUE`, scores cells by cell cycle stage.
 #' @param min_nuclei_per_gene \emph{Gene filter}. The minimum number of nuclei in which a gene must be present. Genes that are present in very few nuclei are uninformative and unlikely to help in differentiating groups of nuclei. In general, most genes removed by this filtering will be those not detected in any nucleus.
 #' @param min_nCount_RNA \emph{Nucleus filter}. The minimum number of transcripts detected per nucleus.
 #' @param max_nCount_RNA \emph{Nucleus filter}. The maximum number of transcripts detected per nucleus. An unusually high number of RNA molecules suggests that the nucleus is a multiplet.
@@ -19,25 +20,28 @@
 #' @param cluster_resolutions Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.
 #' @param final_clustering_resolution Optional. The chosen clustering resolution of the dataset to use for downstream analysis. This is the resolution at which clusters appear to capture true biological groupings of interest in the dataset. This can be decided by consulting the clustering tree. If no value given, downstream analysis will not proceed.
 #' @param out_dir Optional. Output directory. If no value given, the output will be saved to `out/{experiment}/{genome}/{sublibrary}/{parse_analysis_subdir}/{integrated,unintegrated}`.
-#' @param out_subdir Optional. Name of a subdirectory within the automatically generated output path to save output to. 
+#' @param out_subdir Optional. Name of a subdirectory within the automatically generated output path to save output to.
 #' @param sample_subset Optional. Vector of sample IDs to subset to.
-#' @param cell_subset Optional. Vector of cell IDs to subset to. 
+#' @param cell_subset Optional. Vector of cell IDs to subset to.
 #' @param do_timestamp If `TRUE`, will save the output to a time-stamped subdirectory (e.g. `20230217_105554/`).
 #' @param do_integration If `TRUE`, will integrate the dataset and save the output to `integrated/` subdirectory. If `FALSE` (default), output will save to `unintegrated/` subdirectory.
 #' @param integration_col If `do_integration` is `TRUE`, Seurat metadata column upon which to integrate the dataset.
 #' @param final_annotations Named vector of celltype annotations for the clusters/partitions in the dataset.
 #' @param final_annotations_lvl The level of grouping (cluster or partition) at which the `final_annotations` should be applied. Default is "partition".
-#' @param testing If `testing` is `TRUE`, a test run of the function is performed using a subset of a small dataset. The output is saved to `out/test/`.
-#' @param rerun If `rerun` is `TRUE`, caches will be invalidated and all analyses will be run from scratch. If `FALSE` (default) and the pipeline has been run previously in the same directory, caches will be used.
+#' @param testing If `TRUE`, a test run of the function is performed using a subset of a small dataset. The output is saved to `out/test/`.
+#' @param rerun If `TRUE`, caches will be invalidated and all analyses will be run from scratch. If `FALSE` (default) and the pipeline has been run previously in the same directory, caches will be used.
+#' @param do_add_sample_metadata If `TRUE`, will add sample metadata.
+#' @param do_add_summary_stats If `TRUE`, will add summary statistics.
 #' @return A Seurat object.
 #'
 #' @export
 generate_qc_report <-
   function(parse_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
-           experiment,
+           experiment = NULL,
            genome = "hg38",
            sublibrary = "comb",
            parse_analysis_subdir = "all-well/DGE_filtered/",
+           dge_mtx_dir = NULL,
            do_filtering = T,
            remove_doublets = T,
            do_cell_cycle_scoring = T,
@@ -61,10 +65,12 @@ generate_qc_report <-
            final_annotations = NULL,
            final_annotations_lvl = "partition",
            testing = F,
-           rerun = F) {
+           rerun = F,
+           do_add_sample_metadata = T,
+           do_add_summary_stats = T) {
 
   # for internal test runs
-  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;out_subdir=NULL;sample_subset = NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F
+  # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/");experiment=NULL;genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;out_subdir=NULL;sample_subset=NULL;cell_subset=NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F;do_add_sample_metadata=T;do_add_summary_stats=T
   # testing: Li filters # remove_doublets=T;min_nuclei_per_gene = 5;min_nCount_RNA = 300;max_nCount_RNA = 10000;min_nFeature_RNA = 200;max_nFeature_RNA = 10000;max_percent_mito = 15
   # testing: pilot # experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_annotations_lvl="cluster";final_annotations=final_annotations_list[[experiment]][[final_annotations_lvl]]
   # testing: 2 SLs # experiment="230127_A01366_0343_AHGNCVDMXY";sublibrary="comb"
@@ -72,6 +78,7 @@ generate_qc_report <-
   # testing: 8 SLs + pilot # experiment=c("221202_A01366_0326_AHHTTWDMXY","230210_A01366_0351_AHNHCFDSX5");sublibrary=c("SHE5052A9_S101","comb");sample_subset=strsplit("N045_V008C,N045_V010,N045_V003,N045_V004,N045_N001,N059_V001,N059_M001,N059_V102A,N059_N001,N059_V003,N059_V103,N088_V006,N088_V004,N088_V008,N088_V106,N088_V108,N090_V116,N090_V124D,N090_V126,N090_V127,N090_V124A,N090_V128,N090_N002,K891_V014", ",")[[1]]
   # testing: args  # library(devtools);load_all(); args <- dget("out/230127_A01366_0343_AHGNCVDMXY/hg38/comb/all-well/DGE_filtered/args_for_generate_qc_report.R") ; list2env(args,globalenv())
   # testing: args  # args <- dget("out/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/unintegrated/args_for_generate_qc_report.R") ; args$parse_dir <- "/Volumes/TracerX/working/VHL_GERMLINE/tidda/parse_pipeline/"
+  # testing: PDOs # dge_mtx_dir="/nemo/lab/turajlics/home/users/dengd/scRNA_seq/proj_PDOT_Parse/output/Parse_lib_1/all-well/DGE_unfiltered/";max_percent_mito=30;max_nCount_RNA=30000;do_add_sample_metadata=F;do_add_summary_stats=F;out_dir="out/PDOs/"
 
   # capture arguments
   args <- list(parse_dir = parse_dir,
@@ -79,6 +86,7 @@ generate_qc_report <-
                genome = genome,
                sublibrary = sublibrary,
                parse_analysis_subdir = parse_analysis_subdir,
+               dge_mtx_dir = dge_mtx_dir,
                do_filtering = do_filtering,
                remove_doublets = remove_doublets,
                min_nuclei_per_gene = min_nuclei_per_gene,
@@ -101,7 +109,9 @@ generate_qc_report <-
                final_annotations = final_annotations,
                final_annotations_lvl = final_annotations_lvl,
                testing = testing,
-               rerun = rerun)
+               rerun = rerun,
+               do_add_sample_metadata = do_add_sample_metadata,
+               do_add_summary_stats = do_add_summary_stats)
 
   # check arguments
   check_args(args)

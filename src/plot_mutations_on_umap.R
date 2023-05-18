@@ -7,78 +7,91 @@ devtools::load_all()
 out_dir <- "out/230210_A01366_0351_AHNHCFDSX5_x_221202_A01366_0326_AHHTTWDMXY/hg38/comb_x_SHE5052A9_S101/all-well/DGE_filtered/unintegrated/"
 out <- get_out(out_dir)
 
-# load cds
-cds <- readRDS(paste0(out$cache, "cds_annotated.rds"))
-col_data <- SummarizedExperiment::colData(cds) %>% tibble::as_tibble(rownames = "cell")
-
 # get mutation data
 muts <-
   readr::read_tsv(paste0(out$base, "mutect2_mutations.tsv"))
 
-# get infercnv metadata
-curr_analysis_mode <- "samples"
-infercnv_metadata <- list()
-SummarizedExperiment::colData(cds)$nih_pid %>%
-  unique() %>%
-  purrr::walk(function(nih_pid) {
-    print(nih_pid)
-    infercnv_dir <- paste(out$base, nih_pid, "infercnv", curr_analysis_mode, sep = "/")
+# load or make cds_infercnv
+if (!file.exists(paste0(out$cache, "cds_infercnv.rds"))) {
 
-    if(file.exists(paste0(infercnv_dir, "/run.final.infercnv_obj"))) {
-      # write metadata file
-      infercnv::add_to_seurat(infercnv_output_path = infercnv_dir)
-      infercnv_metadata[[nih_pid]] <<-
-        read.table(paste0(infercnv_dir, "/map_metadata_from_infercnv.txt"),
-                   row.names = 1) %>%
-        tibble::as_tibble(rownames = "cell")
-    } else {
-      cat("No run.final.infercnv_obj file for", nih_pid, "!\n")
-    }
-  })
+  # load cds
+  cds <- readRDS(paste0(out$cache, "cds_annotated.rds"))
+  col_data <- SummarizedExperiment::colData(cds) %>% tibble::as_tibble(rownames = "cell")
 
-# add to cnv and muts and hif activation to cds object
-SummarizedExperiment::colData(cds) <-
-  cbind(
-    SummarizedExperiment::colData(cds),
-    tibble::tibble(cell = colnames(cds),
-                   sample = SummarizedExperiment::colData(cds)$sample) %>%
-      dplyr::left_join(
-        infercnv_metadata %>% dplyr::bind_rows(),
-        by = "cell") %>%
-      dplyr::left_join(
-        muts %>%
-          dplyr::select(-nih_pid) %>%
-          dplyr::rename_with(.cols = -c("sample"), ~ paste0(.x, "_mut")),
-        by = "sample") %>%
-      dplyr::select(-sample, -cell)
-  )
+  # get infercnv metadata
+  curr_analysis_mode <- "samples"
+  infercnv_metadata <- list()
+  SummarizedExperiment::colData(cds)$nih_pid %>%
+    unique() %>%
+    purrr::walk(function(nih_pid) {
+      print(nih_pid)
+      infercnv_dir <- paste(out$base, nih_pid, "infercnv", curr_analysis_mode, sep = "/")
 
-# add hif expression in each cell to coldata
-hif_activ <-
-  monocle3::aggregate_gene_expression(
-    cds,
-    gene_group_df =
-      tibble::enframe(markers[c("HIF", "proximal tubule")]) %>%
-      tidyr::unnest() %>%
-      dplyr::select(2,1))
-SummarizedExperiment::colData(cds)$hif <-
-  hif_activ["HIF",]
+      if(file.exists(paste0(infercnv_dir, "/run.final.infercnv_obj"))) {
+        # write metadata file
+        infercnv::add_to_seurat(infercnv_output_path = infercnv_dir)
+        infercnv_metadata[[nih_pid]] <<-
+          read.table(paste0(infercnv_dir, "/map_metadata_from_infercnv.txt"),
+                     row.names = 1) %>%
+          tibble::as_tibble(rownames = "cell")
+      } else {
+        cat("No run.final.infercnv_obj file for", nih_pid, "!\n")
+      }
+    })
 
-# add vhl status to coldata
-SummarizedExperiment::colData(cds)$vhl_status <-
-  SummarizedExperiment::colData(cds) %>%
-  tibble::as_tibble() %>%
-  dplyr::mutate(vhl_status = dplyr::case_when(
-    partition_lineage == "immune" ~ NA,
-    has_loss_chr3 == 1 & VHL_mut == 1 ~ "VHL mut + 3p loss",
-    has_loss_chr3 == 1 ~ "3p loss",
-    VHL_mut == 1 ~ "VHL mut",
-    TRUE ~ "WT")) %>%
-  dplyr::pull(vhl_status)
+  # add to cnv and muts and hif activation to cds object
+  SummarizedExperiment::colData(cds) <-
+    cbind(
+      SummarizedExperiment::colData(cds),
+      tibble::tibble(cell = colnames(cds),
+                     sample = SummarizedExperiment::colData(cds)$sample) %>%
+        dplyr::left_join(
+          infercnv_metadata %>% dplyr::bind_rows(),
+          by = "cell") %>%
+        dplyr::left_join(
+          muts %>%
+            dplyr::select(-nih_pid) %>%
+            dplyr::rename_with(.cols = -c("sample"), ~ paste0(.x, "_mut")),
+          by = "sample") %>%
+        dplyr::select(-sample, -cell)
+    )
 
-# save cds
-saveRDS(cds, paste0(out$cache, "cds_infercnv.rds"))
-# cds <- readRDS(paste0(out$cache, "cds_infercnv.rds"))
+  # add hif expression in each cell to coldata
+  hif_activ <-
+    monocle3::aggregate_gene_expression(
+      cds,
+      gene_group_df =
+        tibble::enframe(markers[c("HIF", "proximal tubule")]) %>%
+        tidyr::unnest() %>%
+        dplyr::select(2,1))
+  SummarizedExperiment::colData(cds)$hif <-
+    hif_activ["HIF",]
+
+  # add vhl status to coldata
+  SummarizedExperiment::colData(cds)$vhl_status <-
+    SummarizedExperiment::colData(cds) %>%
+    tibble::as_tibble() %>%
+    dplyr::mutate(vhl_status = dplyr::case_when(
+      partition_lineage == "immune" ~ NA,
+      has_loss_chr3 == 1 & VHL_mut == 1 ~ "VHL mut + 3p loss",
+      has_loss_chr3 == 1 ~ "3p loss",
+      VHL_mut == 1 ~ "VHL mut",
+      TRUE ~ "WT")) %>%
+    dplyr::pull(vhl_status)
+
+  # save cds
+  saveRDS(cds, paste0(out$cache, "cds_infercnv.rds"))
+
+} else {
+
+  cat("File cds_infercnv.rds already exists, reading in...\n")
+
+  # read cds
+  cds <- readRDS(paste0(out$cache, "cds_infercnv.rds"))
+
+}
+
+# get coldata
 col_data <- SummarizedExperiment::colData(cds) %>% tibble::as_tibble(rownames = "cell")
 
 # get hif activation
@@ -90,6 +103,9 @@ hif_genes <-
       dplyr::transmute(cell,
                        lin_chr = paste(partition_annot, has_loss_chr3, sep = "_")))
 pheatmap::pheatmap(hif_genes, scale = "row", clustering_method = "ward.D2")
+pheatmap::pheatmap(hif_genes[,c("epithelial_0", "epithelial_1")],
+                   scale = "none", clustering_method = "ward.D2")
+
 
 agg_hif <-
   monocle3::aggregate_gene_expression(
@@ -98,12 +114,47 @@ agg_hif <-
     gene_group_df =
       tibble::enframe(markers[c("HIF", "proximal tubule")]) %>% tidyr::unnest() %>% dplyr::select(2,1))
 
+# test significant difference in chr3 loss between non-malignant annotations sampled from each lesion type
+# one-way anova
+chr3_in_normal_cells <-
+  col_data %>%
+  dplyr::filter(partition_annot == "epithelial") %>%
+  dplyr::transmute(lesion_type = factor(lesion_type, levels = c("normal_renal", "renal_cyst", "solid", "metastasis")),
+                   proportion_scaled_loss_chr3,
+                   has_loss_chr3)
 
-# get col_data
+# test normality
+chr3_in_normal_cells %>%
+  dplyr::group_by(lesion_type) %>%
+  dplyr::group_map(~ nortest::ad.test(.x$proportion_scaled_loss_chr3))
+# not normally distributed
+
+# kruskal-wallace test
+kruskal.test(has_loss_chr3 ~ lesion_type,
+             data = chr3_in_normal_cells)
+
+pdf("~/Desktop/chr3_haploid_prop_in_normal_cells.pdf")
+col_data %>%
+  dplyr::filter(partition_lineage == "normal",
+                !is.na(has_loss_chr3)) %>%
+  dplyr::group_by(lesion_type) %>%
+  dplyr::mutate(`chr3 status` =
+                  ifelse(has_loss_chr3 == 1,
+                         "haploid", "diploid") %>%
+                  factor(levels = c("haploid", "diploid")),
+                prop_lost = mean(has_loss_chr3)) %>%
+  ggplot2::ggplot(ggplot2::aes(x = reorder(lesion_type, prop_lost), fill = `chr3 status`)) +
+  ggplot2::geom_bar(position = "fill") +
+  ggplot2::theme_void() +
+  ditto_colours +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(size = 15),
+                 legend.text = ggplot2::element_text(size = 15),
+                 legend.title = ggplot2::element_text(size = 15))
+dev.off()
+
+# test significant change in chr3 loss between malignant and non-malignant annotations
 kruskal.test(proportion_scaled_loss_chr3 ~ cluster_annot,
-             data = SummarizedExperiment::colData(cds) %>%
-               tibble::as_tibble())
-
+             data = col_data)
 col_data %>%
   dplyr::filter(partition_lineage != "immune") %>%
   {

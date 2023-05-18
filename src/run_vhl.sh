@@ -20,7 +20,7 @@ Rscript src/get_runs.R
 cat out/runs.tsv | sed 1d | grep FALSE | grep -P '230210|221202' |
 grep -P 'comb|SHE5052A9_S101' | grep -P '\thg38\t' | grep DGE_unfiltered |
 {
-  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem ; do
+  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem out_dir ; do
     . src/submit_generate_qc_report.sh
   done
 }
@@ -30,7 +30,7 @@ cat out/runs.tsv | sed 1d |
 grep -P '\t221202_A01366_0326_AHHTTWDMXY\thg38\t' |
 grep DGE_filtered | grep FALSE |
 {
-  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem ; do
+  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem out_dir dge_mtx_dir ; do
     . src/submit_generate_qc_report.sh
   done
 }
@@ -40,9 +40,17 @@ cat out/runs.tsv | sed 1d |
 grep -P '230210_A01366_0351_AHNHCFDSX5,221202_A01366_0326_AHHTTWDMXY' |
 grep DGE_filtered | grep FALSE |
 {
-  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem ; do
+  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem out_dir dge_mtx_dir ; do
     . src/submit_generate_qc_report.sh
   done
 }
 
+# Daqi's PDOs
+cat out/runs.tsv | sed 1d |
+grep "PDOs" |
+{
+  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem out_dir dge_mtx_dir ; do
+    . src/submit_generate_qc_report.sh
+  done
+}
 
