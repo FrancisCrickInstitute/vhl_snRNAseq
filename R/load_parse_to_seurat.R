@@ -41,7 +41,7 @@ load_parse_to_seurat <-
         # testing: # exp=experiment[2];sublib=sublibrary[2]
 
         # read in DGE matrix
-        sublib_dir <- paste(parse_dir, "/analysis/", exp, genome, sublib, sep = "/")
+        sublib_dir <- paste(parse_dir, exp, genome, sublib, sep = "/")
         dge_dir <- paste(sublib_dir, parse_analysis_subdir, sep = "/")
         dge_mat <- Seurat::ReadParseBio(dge_dir)
 
@@ -76,7 +76,7 @@ load_parse_to_seurat <-
 
           # read in sample metadata and add to misc slot
           seu_i@misc$sample_metadata <-
-            paste0(parse_dir, "/expdata/", exp, "/sample_metadata.tsv") %>%
+            paste0(parse_dir, "/../expdata/", exp, "/sample_metadata.tsv") %>%
             readr::read_tsv(show_col_types = F)
 
           # add to Seurat object meta.data
@@ -95,9 +95,10 @@ load_parse_to_seurat <-
 
           # get summary stats from parse analysis
           seu_i@misc$summary_stats <-
-            paste(parse_dir, "/analysis/", exp, genome, sublib, "/agg_samp_ana_summary.csv", sep = "/") %>%
+            paste(parse_dir, exp, genome, sublib, "/agg_samp_ana_summary.csv", sep = "/") %>%
             readr::read_csv(show_col_types = FALSE) %>%
-            tidyr::pivot_longer(cols = -statistic, names_to = "sample") %>%
+            dplyr::rename(statistic = 1) %>%
+            tidyr::pivot_longer(cols = -c("statistic"), names_to = "sample") %>%
             dplyr::mutate(statistic = statistic %>% gsub(paste0(genome, "\\_"), "", .)) %>%
             dplyr::filter(
               statistic %in% statistics

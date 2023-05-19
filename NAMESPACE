@@ -3,5 +3,6 @@
 export(generate_garnett_marker_file)
 export(generate_qc_report)
 export(top_markers_develop)
+export(top_markers_fix)
 importFrom(dplyr,n)
 importFrom(magrittr,"%>%")

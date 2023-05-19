@@ -44,13 +44,3 @@ grep DGE_filtered | grep FALSE |
     . src/submit_generate_qc_report.sh
   done
 }
-
-# Daqi's PDOs
-cat out/runs.tsv | sed 1d |
-grep "PDOs" |
-{
-  while read path experiment genome sublibrary parse_analysis_subdir do_integration sample_subset mem out_dir dge_mtx_dir ; do
-    . src/submit_generate_qc_report.sh
-  done
-}
-

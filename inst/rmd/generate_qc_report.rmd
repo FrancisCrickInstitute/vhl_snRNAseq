@@ -1,5 +1,5 @@
 ---
-title: "VHL snRNAseq QC report"
+title: "snRNAseq QC report for ccRCC"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 geometry: margin=1in
 fontfamily: mathpazo
@@ -25,7 +25,7 @@ load_all()
 
 ```{r testing, include = testing == T, eval = testing == T}
 args <- list(
-  parse_dir = paste0(get_base_dir(), "parse_pipeline/"),
+  parse_dir = paste0(get_base_dir(), "parse_pipeline/analysis/"),
   experiment = "221202_A01366_0326_AHHTTWDMXY",
   genome = "hg38",
   sublibrary = "SHE5052A9_S101",
@@ -41,7 +41,6 @@ args <- list(
   max_percent_mito = 15,
   vars_to_regress = c("percent_mito", "nCount_RNA"),
   n_dims = NULL,
-  final_clustering_resolution = 0.3,
   do_integration = F,
   sample_subset = c("N090_V124A", "N090_V127"),
   final_annotations = NULL,
@@ -134,7 +133,7 @@ p <-
 p
 ```
 
-```{r summary_statistics_plot, class.source = 'fold-hide', message = F, warning = F, fig.height = 15, fig.cap = "Plot of summary statistics by sample"}
+```{r summary_statistics_plot, class.source = 'fold-hide', eval = do_add_summary_stats == T, message = F, warning = F, fig.height = 15, fig.cap = "Plot of summary statistics by sample"}
 p <-
   seu@misc$summary_stats %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
@@ -168,7 +167,7 @@ From [**Parse Biosciences Computational Support**](https://support.parsebioscien
 > *There may be situations where the cell count estimate does not line up with the researcher's expectations, or the barcode-rank plot lacks a distinct "drop" in the curve. The latter situation can occur when there is an excess number of dead/damaged cells in the data set, creating an intermediate "smoothness" on the curve where a drop would be expected. In order to manually adjust the cell cutoff there are two options: rerun the pipeline at --mode dge using one of the cell calling parameters described in the article Pipeline Options, or read in the unfiltered (DGE_unfiltered) matrix into an analysis package such as Seurat or Scanpy and adjust the minimum transcript threshold in the cell quality control steps. If the user plans on performing a more granular analysis in package such as Seurat or Scanpy, the latter option may be preferable.*
 
 ```{r barcode_rank, echo = F}
-# knitr::include_graphics(paste(parse_dir, "analysis", experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/"))
+# knitr::include_graphics(paste(parse_dir, experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/"))
 ```
 
 ### Annotate doublets
@@ -295,9 +294,9 @@ p <-
   dplyr::count(fail_criteria) %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = n, fill = fail_criteria)) +
   ggplot2::geom_col() +
-  ditto_colours +
+  ggplot2::theme_minimal() +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
-  ggplot2::scale_fill_discrete(na.value = "grey")
+  ggplot2::scale_fill_manual(values = dittoSeq::dittoColors(), na.value = "grey")
 p
 ```
 
@@ -589,12 +588,12 @@ Plotting all different groupings of the data onto the reductions can help reveal
 ```{r avail_groupings, include = F}
 # amend groupings
 avail_groupings <- groupings[groupings %in% colnames(SummarizedExperiment::colData(cds))]
+# reductions
+redus <- c("PCA", "UMAP")
 ```
 
-```{r groupings_vs_reductions, class.source = 'fold-hide', fig.dim = c(10, 40), fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
-# fig.dim = get_fig_dims(length(avail_groupings) * (length(cds@reduce_dim_aux) + 1), n_cols = length(cds@reduce_dim_aux) + 1), 
+```{r groupings_vs_reductions, class.source = 'fold-hide', fig.dim = get_fig_dims(n_plots = (length(redus) + 1) * length(avail_groupings), n_cols = 3), fig.cap = "Plot of all Monocle3 dimensionality reductions, coloured by groupings"}
 # plot all groupings vs all reductions
-redus <- c("PCA", "UMAP")
 groupings_vs_reductions <- list()
 purrr::walk(avail_groupings, function(grouping) {
   purrr::walk(redus, function(redu) {
@@ -612,7 +611,8 @@ purrr::walk(avail_groupings, function(grouping) {
     groupings_vs_reductions[[paste0(grouping, "_legend")]] <<-
       lemon::g_legend(p)
     groupings_vs_reductions[[title]] <<- 
-      p + ggplot2::theme(legend.position = "none")
+      p + 
+      ggplot2::theme(legend.position = "none")
   })
 })
 # create grob layout
@@ -668,9 +668,11 @@ We can now cluster the cells. Monocle3 does not require a user-defined clusterin
 lvls <- c("cluster", "partition")
 cds <- xfun::cache_rds({
   cds <- monocle3::cluster_cells(cds, random_seed = random_seed)
-  # add it to the colData
-  SummarizedExperiment::colData(cds)$cluster <- as.factor(monocle3::clusters(cds))
-  SummarizedExperiment::colData(cds)$partition <- as.factor(monocle3::partitions(cds))
+  # add it to the colData and reorder clusters and partitions numerically
+  SummarizedExperiment::colData(cds)$cluster <- 
+    factor(monocle3::clusters(cds), levels = sort(as.integer(levels(monocle3::clusters(cds)))))
+  SummarizedExperiment::colData(cds)$partition <- 
+    factor(monocle3::partitions(cds), levels = sort(as.integer(levels(monocle3::partitions(cds)))))
   cds
 }, file = "cds_clustered.rds", rerun = rerun) 
 ```
@@ -867,13 +869,15 @@ p <-
   ) +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, size = 5),
                  legend.text = ggplot2::element_text(size = 5)) +
-  dittoSeq::dittoBarPlot(cds,
-                         var = "singler_annot_main",
-                         group.by = "cluster",
-                         scale = "count",
-                         main = "") +
+  SummarizedExperiment::colData(cds) %>%
+  tibble::as_tibble() %>%
+  ggplot2::ggplot(ggplot2::aes(x = cluster, fill = singler_annot_main)) +
+  ggplot2::geom_bar() + 
+  ditto_colours +
+  ggplot2::theme_classic() +
   ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90, size = 5),
-                 legend.text = ggplot2::element_text(size = 5)) +
+                 legend.text = ggplot2::element_text(size = 5),
+                 legend.title = ggplot2::element_blank()) +
   patchwork::plot_layout(
     ncol = 2,
     widths = c(
@@ -1006,7 +1010,7 @@ p
 #### HIF target gene expression
 
 ```{r hif_genes_vs_cells, eval = multiple_partitions == T, echo = F, warning = F, message = F, fig.dim = c(10, 10), fig.cap = "Plot of HIF module score for all cells"}
-p <- monocle3::plot_cells(cds, genes = avail_markers$HIF)
+p <- monocle3::plot_cells(cds, genes = avail_markers$HIF, label_groups_by_cluster = F)
 p
 ```
 
@@ -1089,15 +1093,22 @@ cat(unlist(to_knit), sep = '\n')
 
 ```{r summarise_annots, echo = F}
 cell_groupings_summary <- xfun::cache_rds({
+  
   cell_groupings <-
     dplyr::as_tibble(SummarizedExperiment::colData(cds)) %>%
-    tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group") 
+    tidyr::pivot_longer(c("cluster", "partition"), names_to = "cell_grouping", values_to = "cell_group")
+  
   # counts
-  cell_groupings %>% 
+  cell_groupings_summary <-
+    cell_groupings %>% 
     dplyr::group_by(cell_grouping, cell_group) %>%
-    dplyr::count() %>%
-    dplyr::left_join(
-      # lesion_types
+    dplyr::count() 
+  
+  # add percent by lesion type
+  if ("lesion_type" %in% names(cell_groupings)) {
+    cell_groupings_summary <-
+      cell_groupings_summary %>%
+      dplyr::left_join(
       cell_groupings %>%
         dplyr::group_by(cell_grouping, cell_group, lesion_type) %>%
         dplyr::count() %>% 
@@ -1105,7 +1116,12 @@ cell_groupings_summary <- xfun::cache_rds({
         dplyr::mutate(prop = n / sum(n)) %>%
         tidyr::pivot_wider(names_from = lesion_type, values_from = prop, id_cols = dplyr::starts_with("cell_group")),
       by = c("cell_grouping", "cell_group")
-    ) %>%
+    ) 
+  }
+  
+  # add percent by singler annot
+  cell_groupings_summary <-
+    cell_groupings_summary %>%
     dplyr::left_join(
       # singler_annots
       cell_groupings %>%
@@ -1129,6 +1145,9 @@ cell_groupings_summary <- xfun::cache_rds({
         dplyr::summarise(top_markers = paste(gene_id, collapse = ", ")),
       by = c("cell_grouping", "cell_group")
     )
+  
+  cell_groupings_summary
+  
 }, file = "cell_groupings_summary.rds", rerun = rerun)
 knitr::kable(cell_groupings_summary, digits = 3)
 ```

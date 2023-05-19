@@ -5,11 +5,12 @@
 \title{analyse snRNAseq output from Parse Biosciences split-pipe}
 \usage{
 generate_qc_report(
-  parse_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/",
-  experiment,
+  parse_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/analysis/",
+  experiment = NULL,
   genome = "hg38",
   sublibrary = "comb",
   parse_analysis_subdir = "all-well/DGE_filtered/",
+  dge_mtx_dir = NULL,
   do_filtering = T,
   remove_doublets = T,
   do_cell_cycle_scoring = T,
@@ -33,11 +34,13 @@ generate_qc_report(
   final_annotations = NULL,
   final_annotations_lvl = "partition",
   testing = F,
-  rerun = F
+  rerun = F,
+  do_add_sample_metadata = T,
+  do_add_summary_stats = T
 )
 }
 \arguments{
-\item{parse_dir}{Path to Parse Biosciences split-pipe directory.}
+\item{parse_dir}{Path to Parse Biosciences split-pipe \verb{analysis/} subdirectory.}
 
 \item{experiment}{The name of the experiment run via split-pipe. If you want to combine multiple runs, pass a vector.}
 
@@ -46,6 +49,8 @@ generate_qc_report(
 \item{sublibrary}{The sublibrary to analyse. Default is "comb". If you are combining multiple runs, pass a vector whose order matches that of the vector passed to \code{experiment}.}
 
 \item{parse_analysis_subdir}{Parse Biosciences split-pipe DGE subdirectory. This directory must contain \code{DGE.mtx}, \code{all_genes.csv}, and \code{cell_metadata.csv} files. This will indicate which wells to include and whether to use the \verb{DGE_filtered/} or \verb{DGE_unfiltered/} matrix. Default is "all-well/DGE_filtered/".}
+
+\item{dge_mtx_dir}{Optional. Full path to the directory containing the \code{DGE.mtx} file produced by Parse Biosciences split-pipe.}
 
 \item{do_filtering}{If \code{TRUE}, apply quality control filters to genes and nuclei.}
 
@@ -89,9 +94,13 @@ generate_qc_report(
 
 \item{final_annotations_lvl}{The level of grouping (cluster or partition) at which the \code{final_annotations} should be applied. Default is "partition".}
 
-\item{testing}{If \code{testing} is \code{TRUE}, a test run of the function is performed using a subset of a small dataset. The output is saved to \verb{out/test/}.}
+\item{testing}{If \code{TRUE}, a test run of the function is performed using a subset of a small dataset. The output is saved to \verb{out/test/}.}
 
-\item{rerun}{If \code{rerun} is \code{TRUE}, caches will be invalidated and all analyses will be run from scratch. If \code{FALSE} (default) and the pipeline has been run previously in the same directory, caches will be used.}
+\item{rerun}{If \code{TRUE}, caches will be invalidated and all analyses will be run from scratch. If \code{FALSE} (default) and the pipeline has been run previously in the same directory, caches will be used.}
+
+\item{do_add_sample_metadata}{If \code{TRUE}, will add sample metadata.}
+
+\item{do_add_summary_stats}{If \code{TRUE}, will add summary statistics.}
 
 \item{cluster_resolutions}{Optional. A vector of clustering resolutions to test. A higher resolution will result in a larger number of communities. Default is 0.1-0.8.}
 }

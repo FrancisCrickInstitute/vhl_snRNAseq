@@ -2,7 +2,7 @@
 # generate QC report for snRNAseq experiment
 run_info=generate_qc_report_PDOs
 script=src/sbatch/sbatch_${run_info}.sh
-mem=120
+mem=62
 echo $run_info
 
 cat << EOF > $script
