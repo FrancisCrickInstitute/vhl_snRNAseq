@@ -5,6 +5,7 @@ load_parse_to_seurat <-
            sublibrary,
            parse_analysis_subdir,
            dge_mtx_dir,
+           sample_metadata_file,
            min_nFeature_RNA,
            min_nuclei_per_gene,
            sample_subset = NULL,
@@ -74,10 +75,16 @@ load_parse_to_seurat <-
         # add sample metadata
         if(do_add_sample_metadata == T) {
 
+          #
+          if (is.null(sample_metadata_file)) {
+            sm_file <- paste0(parse_dir, "/../expdata/", exp, "/sample_metadata.tsv")
+          } else {
+            sm_file <- sample_metadata_file
+          }
+
           # read in sample metadata and add to misc slot
           seu_i@misc$sample_metadata <-
-            paste0(parse_dir, "/../expdata/", exp, "/sample_metadata.tsv") %>%
-            readr::read_tsv(show_col_types = F)
+            readr::read_tsv(sm_file, show_col_types = F)
 
           # add to Seurat object meta.data
           seu_i@meta.data <-

@@ -110,6 +110,7 @@ seu <- xfun::cache_rds({
     sublibrary,
     parse_analysis_subdir,
     dge_mtx_dir,
+    sample_metadata_file,
     min_nFeature_RNA = 0,
     min_nuclei_per_gene = min_nuclei_per_gene,
     sample_subset = sample_subset,

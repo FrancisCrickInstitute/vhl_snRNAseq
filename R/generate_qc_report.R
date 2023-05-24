@@ -6,6 +6,7 @@
 #' @param sublibrary The sublibrary to analyse. Default is "comb". If you are combining multiple runs, pass a vector whose order matches that of the vector passed to `experiment`.
 #' @param parse_analysis_subdir Parse Biosciences split-pipe DGE subdirectory. This directory must contain `DGE.mtx`, `all_genes.csv`, and `cell_metadata.csv` files. This will indicate which wells to include and whether to use the `DGE_filtered/` or `DGE_unfiltered/` matrix. Default is "all-well/DGE_filtered/".
 #' @param dge_mtx_dir Optional. Full path to the directory containing the `DGE.mtx` file produced by Parse Biosciences split-pipe.
+#' @param sample_metadata_file Optional. Full path to sample metadata file. If none given and `do_add_sample_metadata` is `TRUE`, will take it from the experimental subdirectory of the `expdata/` directory in the Parse split-pipe output.
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
 #' @param do_cell_cycle_scoring If `TRUE`, scores cells by cell cycle stage.
@@ -40,6 +41,7 @@ generate_qc_report <-
            sublibrary = "comb",
            parse_analysis_subdir = "all-well/DGE_filtered/",
            dge_mtx_dir = NULL,
+           sample_metadata_file = NULL,
            do_filtering = T,
            remove_doublets = T,
            do_cell_cycle_scoring = T,
@@ -84,6 +86,7 @@ generate_qc_report <-
                sublibrary = sublibrary,
                parse_analysis_subdir = parse_analysis_subdir,
                dge_mtx_dir = dge_mtx_dir,
+               sample_metadata_file = sample_metadata_file,
                do_filtering = do_filtering,
                remove_doublets = remove_doublets,
                min_nuclei_per_gene = min_nuclei_per_gene,

@@ -24,14 +24,19 @@ get_out <- function(out_dir,
             collapsed_names$sublibrary,
             parse_analysis_subdir,
             sep = "/") %>%
-      { if (do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/") } %>%
-      { if (do_timestamp) paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/") else . }
+      { if (do_integration) paste0(., "/integrated/") else paste0(., "/unintegrated/") }
     else
       # if out_dir is given, use out_dir
       out_dir
   } %>% {
     if (!is.null(out_subdir))
       paste0(., "/", out_subdir, "/")
+    else
+      .
+  } %>% {
+    # timestamp
+    if (do_timestamp)
+      paste0(., format(Sys.time(), "%Y%m%d_%H%M%S"), "/")
     else
       .
   } %>% {
@@ -44,4 +49,5 @@ get_out <- function(out_dir,
                function(x)
       paste0(., x, "/")  %>% clean_path())
   }
+
 }

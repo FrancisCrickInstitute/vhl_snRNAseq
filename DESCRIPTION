@@ -38,8 +38,7 @@ Imports:
     monocle3,
     SummarizedExperiment,
     SeuratWrappers,
-    xfun,
-    ggalluvial
+    xfun
 Depends: 
     R (>= 2.10)
 Suggests: 
