@@ -1,11 +1,11 @@
-get_out <- function(out_dir,
+get_out <- function(out_dir = NULL,
                     out_subdir = NULL,
-                    experiment,
-                    genome,
-                    sublibrary,
-                    parse_analysis_subdir,
-                    do_integration,
-                    do_timestamp) {
+                    experiment = NULL,
+                    genome = NULL,
+                    sublibrary = NULL,
+                    parse_analysis_subdir = NULL,
+                    do_integration = F,
+                    do_timestamp = F) {
 
   if (is.null(out_dir)) {
     collapsed_names <-
