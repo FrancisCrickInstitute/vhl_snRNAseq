@@ -83,3 +83,20 @@ load_all() ; generate_qc_report(
   rerun = rerun,
   do_timestamp = do_timestamp)
 
+
+
+generate_qc_report(
+  data_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/",
+  output_dir = "output/test/",
+  sample_metadata_file = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/expdata/221202_A01366_0326_AHHTTWDMXY/sample_metadata.tsv",
+  genome = "hg38",
+  remove_doublets = T,
+  do_filtering = T,
+  do_cell_cycle_scoring = T,
+  min_nuclei_per_gene = 5,
+  min_nCount_RNA = 300,
+  max_nCount_RNA = 10000,
+  min_nFeature_RNA = 200,
+  max_nFeature_RNA = 10000,
+  max_percent_mito = 15,
+  do_integration = F)

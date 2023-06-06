@@ -1,5 +1,5 @@
 load_parse_to_seurat <-
-  function(parse_dir = NULL,
+  function(data_dir = NULL,
            experiment = NULL,
            genome = NULL,
            sublibrary = NULL,
@@ -32,7 +32,7 @@ load_parse_to_seurat <-
       if (!is.null(dge_mtx_dir)) {
         dge_dir <- dge_mtx_dir
       } else {
-        sublib_dir <- paste(parse_dir, exp, genome, sublib, sep = "/")
+        sublib_dir <- paste(data_dir, exp, genome, sublib, sep = "/")
         dge_dir <- paste(sublib_dir, parse_analysis_subdir, sep = "/")
       }
       dge_mat <- Seurat::ReadParseBio(dge_dir)
@@ -68,7 +68,7 @@ load_parse_to_seurat <-
 
         # if sample metadata path given, read it
         if (is.null(sample_metadata_file)) {
-          sm_file <- paste0(parse_dir, "/../expdata/", exp, "/sample_metadata.tsv")
+          sm_file <- paste0(data_dir, "/../expdata/", exp, "/sample_metadata.tsv")
         } else {
           sm_file <- sample_metadata_file
         }

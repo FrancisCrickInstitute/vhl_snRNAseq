@@ -21,40 +21,6 @@ library(devtools)
 load_all()
 ```
 
-`r if (testing == T) {"# Test run! {-}" }`
-
-```{r testing, include = testing == T, eval = testing == T}
-args <- list(
-  parse_dir = paste0(get_base_dir(), "parse_pipeline/analysis/"),
-  experiment = "221202_A01366_0326_AHHTTWDMXY",
-  genome = "hg38",
-  sublibrary = "SHE5052A9_S101",
-  parse_analysis_subdir = "all-well/DGE_filtered/",
-  dge_mtx_dir = NULL,
-  remove_doublets = T,
-  do_filtering = T,
-  min_nuclei_per_gene = 5,
-  min_nCount_RNA = 300,
-  max_nCount_RNA = 10000,
-  min_nFeature_RNA = 200,
-  max_nFeature_RNA = 10000,
-  max_percent_mito = 15,
-  vars_to_regress = c("percent_mito", "nCount_RNA"),
-  n_dims = NULL,
-  do_integration = F,
-  sample_subset = c("N090_V124A", "N090_V127"),
-  final_annotations = NULL,
-  testing = T,
-  rerun = F,
-  do_add_sample_metadata = do_add_sample_metadata,
-  do_add_summary_stats = do_add_summary_stats
-)
-out <- list(
-  base = "out/test/",
-  cache = "out/test/cache/"
-)
-```
-
 ```{r initialise, include = F}
 # load args to global env
 list2env(args, globalenv())
@@ -73,9 +39,21 @@ ggplot2::theme_set(ggplot2::theme_bw())
 ggplot2::theme_update(legend.text = ggplot2::element_text(size = 7))
 
 # chunk setup
+cache_dir <- paste0(output_dir, "/cache/")
 knitr::opts_chunk$set(fig.align = "center",
-                      cache.path = out$cache,
+                      cache.path = cache_dir,
                       dpi = 300)
+
+# set sample groupings to check at the clustering stage
+groupings <-
+  c("sample", "percent_mito", "percent_ribo", "percent_globin",
+    "date_prep", "nih_pid", "rin", "lesion_type", "tumour_size", "fuhrman_grade") %>%
+  # if genome is human, do cell cycle scoring (doesn't work with other genomes)
+  { if (grepl("hg38", genome)) c(., "Phase") else . } %>%
+  # if checking for doublets, add to the groupings
+  { if (remove_doublets) c(., "doublet") else . } %>%
+  # if multiple experiments, add to the groupings
+  { if (length(data_dir) > 1) c(., "experiment") else . }
 ```
 
 # Run info {-}
@@ -86,69 +64,121 @@ knitr::kable(tibble::tibble(argument = names(args), value = args %>% purrr::map(
 
 # Output info {-}
 
-Output files will be saved to **`r out$base`**.
+Output files will be saved to **`r output_dir`**.
 
-Figures will be saved to **`r out$base`qc_report_files/figure-html/**.
+Figures will be saved to **`r output_dir`qc_report_files/figure-html/**.
 
-Intermediate objects will be cached to **`r out$cache`**.
+Intermediate objects will be cached to **`r cache_dir`**.
+
+# Detect snRNA-seq platform
+
+``` {r detect_platform}
+input_files <- list.files(data_dir)
+platform_files <- list(
+  "Parse Biosciences" = c("DGE.mtx", "all_genes.csv", "cell_metadata.csv"),
+  "10X Genomics" = c("matrix.mtx.gz", "features.tsv.gz", "genes.tsv.gz", "barcodes.tsv.gz")
+)
+platform <-
+  platform_files %>%
+  purrr::map(~ (.x %>% intersect(input_files) %>% length) == 3) %>%
+  unlist() %>%
+  {platform_files[.]} %>%
+  names
+```
+
+The input data comes from the *`r platform`* platform and includes `r paste(input_files, sep = ", ")` files.
 
 # `Seurat` pre-processing
 
 ## Load data and apply gene-level filter
 
-Load Parse Biosciences split-pipe pipeline output as a Seurat object with no cut-offs, remove any missing samples, add sample metadata, add summary statistics, and optionally subset samples. Then filter nuclei per gene. 
+Load snRNA-seq output as a Seurat object with no cut-offs, remove any missing samples, add sample metadata, add summary statistics, and optionally subset samples. Then filter nuclei per gene. 
 Gene-level filtering is performed at this point, based on the `min_nuclei_per_gene` argument. Genes that are present in very few nuclei of the dataset (e.g., <3) are uninformative and unlikely to help in differentiating between groups of nuclei. In general, most genes removed by this filtering step will be those not detected in any nuclei, which will help to trim the size of the object. Additionally, genes are removed that have entries in all nuclei but whose entries are all zero. 
 
 The minimum number of nuclei per gene is set to **`r min_nuclei_per_gene`**.
 
 ``` {r load_data, warning = F}
 seu <- xfun::cache_rds({
-  load_parse_to_seurat(
-    parse_dir,
-    experiment,
-    genome,
-    sublibrary,
-    parse_analysis_subdir,
-    dge_mtx_dir,
-    sample_metadata_file,
-    min_nFeature_RNA = 0,
-    min_nuclei_per_gene = min_nuclei_per_gene,
-    sample_subset = sample_subset,
-    cell_subset = cell_subset,
-    remove_na_samples = T,
-    do_add_sample_metadata = do_add_sample_metadata,
-    do_add_summary_stats = do_add_summary_stats,
-    groupings,
-    statistics
-  )
-}, file = "seu.rds", rerun = rerun)
-```
+  
+  if (platform == "10X Genomics") {
+    
+    # read in expression matrix
+    dge_mat <- Seurat::Read10X(data_dir)
+    
+    # create seurat object
+    seu <- Seurat::CreateSeuratObject(counts = dge_mat)
+    
+  } else if (platform == "Parse Biosciences") {
+    
+    # read in expression matrix
+    dge_mat <- Seurat::ReadParseBio(data_dir)
+    
+    # read in cell metadata
+    cell_metadata <-
+      data_dir %>%
+      paste0("/cell_metadata.csv") %>%
+      readr::read_csv(show_col_types = F) %>%
+      tibble::column_to_rownames("bc_wells") %>%
+      as.data.frame()
+    
+    # create seurat object
+    seu <-
+      dge_mat %>%
+      Seurat::CreateSeuratObject(
+        names.field = 0,
+        meta.data = cell_metadata,
+        min_genes = min_n_feature_RNA,
+        min_cells = min_n_nuclei_per_gene
+      )
+    
+  }
+  
+  # conditionally add sample metadata
+  if (do_add_sample_metadata == T) {
 
-```{r nuclei_per_sample_plot, class.source = 'fold-hide', message = F, warning = F, fig.cap = "Plot of nuclei per sample"}
-p <-
-  dplyr::tibble(sample_id = names(table(seu$sample)),
-                n_nuclei = table(seu$sample)) %>%
-  ggplot2::ggplot(ggplot2::aes(x = sample_id, y = n_nuclei)) +
-  ggplot2::geom_col() +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90))
-p
+    # read in sample metadata and add to misc slot
+    seu@misc$sample_metadata <-
+      readr::read_tsv(sample_metadata_file, show_col_types = F)
+
+    # add to Seurat object meta.data
+    seu@meta.data <-
+      dplyr::left_join(
+        seu@meta.data,
+        seu@misc$sample_metadata %>%
+          dplyr::select(sample, dplyr::any_of(groupings)),
+        by = "sample")
+    rownames(seu@meta.data) <- colnames(seu)
+
+  }
+  
+  # remove genes with no counts
+  counts <- as.matrix(seu@assays$RNA@counts)
+  seu <- subset(seu, features = rownames(counts[rowSums(counts) > 0, ]))
+  
+  # return
+  seu
+  
+}, file = "seu.rds", rerun = rerun)
 ```
 
 ```{r summary_statistics_plot, class.source = 'fold-hide', eval = do_add_summary_stats == T, message = F, warning = F, fig.height = 15, fig.cap = "Plot of summary statistics by sample"}
 p <-
-  seu@misc$summary_stats %>%
+  seu@meta.data %>%
+  tibble::as_tibble() %>%
+  dplyr::group_by(sample) %>%
+  dplyr::summarise(
+    n_nuclei = dplyr::n(),
+    median_nCount_RNA = median(nCount_RNA),
+    median_nFeature_RNA = median(nFeature_RNA)
+  ) %>%
+  tidyr::pivot_longer(-sample, names_to = "statistic") %>%
   ggplot2::ggplot(ggplot2::aes(x = sample, y = value)) +
   ggplot2::geom_col() +
   ggplot2::facet_grid(statistic ~ ., scales = "free") +
-  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) 
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 90)) +
+  ggplot2::theme_classic()
 p
 ```
-
-- `median_tscp_per_cell` - Median number of transcripts detected per cell.
-- `median_genes_per_cell` - Median number of genes detected per cell.
-- `fraction_tscp_in_cells` - Number of unique transcripts associated with barcodes labeled as "cells" divided by the number of reads associated with barcodes labeled as "background" in the barcode-rank plot.
-- `cell_tscp_cutoff` -  Minimum number of transcripts required for barcode to be considered a "cell". Moreover, all barcodes containing "x" number transcripts and greater will be considered a cell, and anything less will be considered background. 
-- `valid_barcode_fraction` - Fraction of starting (fastq) reads that contain a valid set of barcodes. Barcodes are corrected together (as a triple), allowing for multiple differences from the ideal sequences (Mismatches and/or InDels up to edit distance 2 are considered for each barcode).
 
 ## Filter nuclei
 
@@ -158,18 +188,6 @@ Nucleus-level filtering is performed, applying cut-offs to `nCount_RNA`, `nFeatu
 * Unusually low transcript / gene counts indicate barcoding of nuclei with damaged membranes, which are likely low-quality and uninformative.
 * A high percentage of mitochondrial genes indicates death, loss of cytoplasmic RNA, or increased apoptosis. Differences in the application of this filter between scRNA-seq and snRNA-seq are not well covered in literature. Intuitively, snRNA-seq data should be treated with a more stringent cut-off, as it should only include nuclear RNA. However, the renal cortex has an exceptionally high level of mitochondrial activity, so this cut-off has been relaxed somewhat for the VHL dataset. 
 * Nuclei with a high nFeature_RNA:nCount_RNA ratio could be from dying cells.
-
-### Cell counts
-
-From [**Parse Biosciences Computational Support**](https://support.parsebiosciences.com/hc/en-us/articles/4483706086164-How-are-cell-counts-determined-)
-
-> *Cell counts are estimated by ordering barcodes by their respective transcript counts and plotting them along a gradient with log transformed axes. This plot is commonly referred to as a "barcode-rank" plot. When there is a significant change in the number of transcripts associated with each barcode (i.e. the large "drop" in the curve), a minimum transcript threshold is established as the steepest point in the curve. Every barcode greater than or equal to this threshold is labeled as a "cell", while every barcode below this threshold is labeled as "background". Only barcodes that meet the minimum transcript threshold are included in the resulting summary report and filtered expression matrix (i.e. the DGE_filtered folder in the pipeline output directory).*
-> 
-> *There may be situations where the cell count estimate does not line up with the researcher's expectations, or the barcode-rank plot lacks a distinct "drop" in the curve. The latter situation can occur when there is an excess number of dead/damaged cells in the data set, creating an intermediate "smoothness" on the curve where a drop would be expected. In order to manually adjust the cell cutoff there are two options: rerun the pipeline at --mode dge using one of the cell calling parameters described in the article Pipeline Options, or read in the unfiltered (DGE_unfiltered) matrix into an analysis package such as Seurat or Scanpy and adjust the minimum transcript threshold in the cell quality control steps. If the user plans on performing a more granular analysis in package such as Seurat or Scanpy, the latter option may be preferable.*
-
-```{r barcode_rank, echo = F}
-# knitr::include_graphics(paste(parse_dir, experiment, genome, sublibrary, "all-well/figures/fig_tscp_cell_cutoff.png", sep = "/"))
-```
 
 ### Annotate doublets
 
@@ -181,7 +199,11 @@ The `remove_doublets` argument is set to **`r remove_doublets`**.
 
 ```{r identify_doublets, eval = remove_doublets == T, include = remove_doublets == T}
 seu <- xfun::cache_rds({
-  annotate_doublets(seu)
+  seu_dbl <- scDblFinder::scDblFinder(
+    Seurat::as.SingleCellExperiment(seu), samples = "sample"
+  )
+  seu$doublet <- as.numeric(seu_dbl$scDblFinder.class == "doublet")
+  seu
 }, file = "seu_doublets.rds", rerun = rerun)
 ```
 
@@ -237,7 +259,21 @@ Proportions of transcript types of interest (mitochondrial, ribosomal, globin) a
 * `percent_globin` - Globin genes are very abundant in erythrocytes. Depending on your application, you can expect ‘contamination’ of erythrocytes and select against it.
 
 ```{r annotate_transcript_types}
-seu <- annotate_proportions_of_transcript_types(seu)
+transcript_types <-
+  list(mito = "^MT-",
+       ribo = "^RP[SL]",
+       globin = "^HB[^(P)]") 
+
+transcript_types %>%
+  names %>%
+  purrr::map(function(tt) {
+    # use `<<` for global assignment
+    seu <<-
+      seu %>%
+      Seurat::PercentageFeatureSet(
+        pattern = transcript_types[[tt]],
+        col.name = paste0("percent_", tt))
+  })
 ```
 
 ### Define nucleus-level filters
@@ -420,7 +456,7 @@ Seurat::DefaultAssay(seu) <- "integrated"
 seu <- Seurat::ScaleData(seu)
 
 # save seu_integrated
-saveRDS(seu, paste0(out$base, "/seu_integrated.rds"))
+saveRDS(seu, paste0(output_dir, "/seu_integrated.rds"))
 ```
 
 ## Normalisation and scaling
