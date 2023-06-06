@@ -750,7 +750,8 @@ Once cells have been clustered, we can isolate genes that are highly differentia
 First, we identify the top genes that are most specifically expressed in each cluster and each partition. 
 
 ```{r cluster_markers, eval = T, results = F, warning = F, message = F}
-dir.create(out$dea, showWarnings = F)
+dea_dir <- paste0(output_dir, "/dea/")
+dir.create(dea_dir, showWarnings = F)
 # monocle3::top_markers has a bug, so this function doesn't work:
 # marker_test_res <- monocle3::top_markers(cds, group_cells_by = "cluster", reference_cells = 1000)
 
@@ -777,7 +778,7 @@ top_cds_markers <-
       dplyr::top_n(3, pseudo_R2)
   })
 readr::write_tsv(top_cds_markers %>% dplyr::bind_rows(.id = "cell_grouping"), 
-                 paste0(out$dea, "top_3_markers.tsv"))
+                 paste0(dea_dir, "top_3_markers.tsv"))
 ```
 
 ```{r top_markers, eval = T, class.source = 'fold-hide', fig.dim = c(10, dplyr::n_distinct(monocle3::clusters(cds))), fig.cap = "Plot of the mean expression across cells and percentage of cells in each group that express the top 3 marker genes of each group"}
