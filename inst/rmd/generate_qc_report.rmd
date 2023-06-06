@@ -133,6 +133,10 @@ seu <- xfun::cache_rds({
     
   }
   
+  if (!is.null(sample)) {
+    seu@meta.data$sample <- sample
+  }
+  
   # conditionally add sample metadata
   if (do_add_sample_metadata == T) {
 

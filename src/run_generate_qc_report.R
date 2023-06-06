@@ -1,11 +1,7 @@
 args <- commandArgs(trailingOnly=TRUE)
-names(args) <- c("experiment",
-                 "genome",
-                 "sublibrary",
-                 "parse_analysis_subdir",
-                 "do_integration",
-                 "sample_subset",
-                 "out_dir")
+names(args) <- c("data_dir",
+                 "output_dir",
+                 "sample_metadata_file")
 
 # parse comma-delimited args
 args[grepl(",", args)] <- strsplit(args[grepl(",", args)], ",")
@@ -19,11 +15,11 @@ testing = F
 do_timestamp = F
 rerun = F
 
-# dir
-base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
-                   "/Volumes/TracerX/",
-                   "/camp/project/tracerX/")
-setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
+# # dir
+# base_dir <- ifelse(Sys.info()["nodename"] == "Alexs-MacBook-Air-2.local",
+#                    "/Volumes/TracerX/",
+#                    "/camp/project/tracerX/")
+# setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 
 # testing: setwd, default params, load_all # base_dir=ifelse(Sys.info()["nodename"]=="Alexs-MacBook-Air-2.local","/Volumes/TracerX/","/camp/project/tracerX/");setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"));library(devtools);load_all();parse_dir=paste0(base_dir,"working/VHL_GERMLINE/tidda/parse_pipeline/analysis/");genome="hg38";sublibrary="comb";parse_analysis_subdir="all-well/DGE_filtered/";do_filtering=T;remove_doublets=T;min_nuclei_per_gene=5;min_nFeature_RNA=NULL;min_nCount_RNA=NULL;max_nCount_RNA=NULL;max_nFeature_RNA=NULL;max_percent_mito=NULL;vars_to_regress=c("percent_mito","nCount_RNA");n_dims=NULL;clustering_resolutions = seq(0.1, 0.8, by = 0.1);final_clustering_resolution=0.3;out_dir = NULL;sample_subset=NULL;cell_subset=NULL;do_timestamp = F;do_integration = F;integration_col="sample";final_annotations = NULL;final_annotations_lvl="partition";testing=F;rerun=F
 # testing: pilot # args$experiment="221202_A01366_0326_AHHTTWDMXY";sublibrary="SHE5052A9_S101";final_annotations_lvl="cluster";final_annotations=final_annotations_list[[args$experiment]][[final_annotations_lvl]]
@@ -48,22 +44,11 @@ setwd(paste0(base_dir,"working/VHL_GERMLINE/tidda/vhl/"))
 library(devtools)
 load_all()
 
-# check for final annotations
-if (paste(sort(args$experiment, T), collapse = "_x_") %in% names(final_annotations_list)) {
-  final_annotations_lvl <- names(final_annotations_list[[args$experiment]])[1]
-  final_annotations <- final_annotations_list[[args$experiment]][[final_annotations_lvl]]
-} else {
-  final_annotations_lvl <- NULL
-  final_annotations <- NULL
-}
-
 # run qc report
 load_all() ; generate_qc_report(
-  parse_dir = paste0(base_dir, "working/VHL_GERMLINE/tidda/parse_pipeline/analysis/"),
-  experiment = args$experiment,
-  genome = args$genome,
-  sublibrary = args$sublibrary,
-  parse_analysis_subdir = args$parse_analysis_subdir,
+  data_dir = args$data_dir,
+  output_dir = args$output_dir,
+  sample_metadata_file = args$sample_metadata_file,
   remove_doublets = T,
   do_filtering = T,
   do_cell_cycle_scoring = T,
@@ -72,31 +57,7 @@ load_all() ; generate_qc_report(
   max_nCount_RNA = 10000,
   min_nFeature_RNA = 200,
   max_nFeature_RNA = 10000,
-  max_percent_mito = 15,
-  final_clustering_resolution = 0.3,
-  out_dir = args$out_dir,
-  do_integration = args$do_integration,
-  sample_subset = args$sample_subset,
-  final_annotations = final_annotations,
-  final_annotations_lvl = final_annotations_lvl,
-  testing = testing,
-  rerun = rerun,
-  do_timestamp = do_timestamp)
+  max_percent_mito = 15)
 
 
 
-generate_qc_report(
-  data_dir = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/analysis/221202_A01366_0326_AHHTTWDMXY/hg38/SHE5052A9_S101/all-well/DGE_filtered/",
-  output_dir = "output/test/",
-  sample_metadata_file = "/camp/project/tracerX/working/VHL_GERMLINE/tidda/parse_pipeline/expdata/221202_A01366_0326_AHHTTWDMXY/sample_metadata.tsv",
-  genome = "hg38",
-  remove_doublets = T,
-  do_filtering = T,
-  do_cell_cycle_scoring = T,
-  min_nuclei_per_gene = 5,
-  min_nCount_RNA = 300,
-  max_nCount_RNA = 10000,
-  min_nFeature_RNA = 200,
-  max_nFeature_RNA = 10000,
-  max_percent_mito = 15,
-  do_integration = F)

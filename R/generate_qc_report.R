@@ -1,6 +1,8 @@
 #' analyse snRNAseq output from Parse Biosciences split-pipe
 #'
 #' @param data_dir Path to the directory containing the count matrix.
+#' @param output_dir Optional. Default is `./output/`.
+#' @param sample Optional. Name of the sample to be matched with the `sample` column in the `sample_metadata_file`.
 #' @param sample_metadata_file Optional. Full path to sample metadata file. If none given and `do_add_sample_metadata` is `TRUE`, will take it from the experimental subdirectory of the `expdata/` directory in the Parse split-pipe output.
 #' @param do_filtering If `TRUE`, apply quality control filters to genes and nuclei.
 #' @param remove_doublets If `TRUE`, removes suspected doublet nuclei, as detected by the scDblFinder package.
@@ -32,6 +34,7 @@
 generate_qc_report <-
   function(data_dir,
            output_dir = "output/",
+           sample = NULL,
            genome = "hg38",
            sample_metadata_file = NULL,
            do_filtering = T,
